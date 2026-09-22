@@ -7,8 +7,22 @@
 #      ./run_pwr_flow.sh                     # simulate, then analyse
 #      ./run_pwr_flow.sh --skip-sim          # reuse the VCD already there
 #      ./run_pwr_flow.sh --clk-ps 4000       # at 250 MHz instead
+#      ./run_pwr_flow.sh --postlayout        # the Innovus netlist, not DC's
 #
-#  or from lab1/ :   make power
+#  or from lab1/ :   make power  /  make power-postlayout
+#
+#  The two runs measure different things and neither replaces the other:
+#
+#    post-synthesis   ideal clock, no clock tree, estimated wire
+#                     capacitance, zero-delay simulation -- no glitches.
+#                     A lower bound, available as soon as `make synth' is.
+#    post-layout      the routed netlist with its clock tree, delays from
+#                     the Innovus SDF (so glitches happen) and capacitance
+#                     extracted from the real wires (SPEF). This is the
+#                     number to put in your report.
+#
+#  They write separate VCDs and separate reports, so you can run both and
+#  compare.
 #
 #  Same shape as the SoC flow's implementation/power_analysis/
 #  run_pwr_flow.sh: set up the environment, then hand a Tcl script to the
@@ -18,10 +32,12 @@
 #    source /eda/scripts/init_design_vision   (pt_shell / pwr_shell, vcd2saif)
 #    vsim on PATH
 #    make synth   in lab1/, so there is a netlist, an SDF and an SDC
+#    make pnr-all in lab1/, additionally, for --postlayout
 # ===========================================================================
 set -euo pipefail
 
 SKIP_SIM=0
+POSTLAYOUT=0
 CLK_PS=5000
 TOP_MODULE=cordic_accel
 TB=tb_cordic_accel
@@ -29,7 +45,8 @@ DUT_INST=i_dut
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-sim) SKIP_SIM=1; shift ;;
+    --skip-sim)   SKIP_SIM=1; shift ;;
+    --postlayout) POSTLAYOUT=1; shift ;;
     --clk-ps)   CLK_PS="$2"; shift 2 ;;
     --top)      TOP_MODULE="$2"; shift 2 ;;
     *) echo "unknown option: $1"; exit 1 ;;
@@ -40,8 +57,25 @@ export FLOW_ROOT=$(cd ../.. && pwd)
 PWR_DIR=$FLOW_ROOT/implementation/power_analysis
 cd "$PWR_DIR"
 
-NETLIST=$FLOW_ROOT/implementation/design_compiler/netlist/${TOP_MODULE}.v
-VCD_FILE=$PWR_DIR/vcd/${TOP_MODULE}_syn.vcd
+# Which netlist, which constraints, which parasitics, which report names.
+# Everything downstream (the vsim run, PrimePower, the report file names)
+# follows from this one switch -- see the header for what differs.
+if [[ $POSTLAYOUT -eq 1 ]]; then
+  EXPORT=$FLOW_ROOT/implementation/innovus/artefacts/export
+  NETLIST=$EXPORT/${TOP_MODULE}_pnr.v
+  CONSTRAINTS=$EXPORT/${TOP_MODULE}_pnr.sdc
+  SPEF_FILE=$EXPORT/${TOP_MODULE}_pnr.spef
+  VCD_FILE=$PWR_DIR/vcd/${TOP_MODULE}_pnr.vcd
+  RPT=${TOP_MODULE}_pnr
+  BUILD_HINT="run 'make pnr-all' in lab1/ first"
+else
+  NETLIST=$FLOW_ROOT/implementation/design_compiler/netlist/${TOP_MODULE}.v
+  CONSTRAINTS=$FLOW_ROOT/implementation/design_compiler/netlist/${TOP_MODULE}.sdc
+  SPEF_FILE=""
+  VCD_FILE=$PWR_DIR/vcd/${TOP_MODULE}_syn.vcd
+  RPT=${TOP_MODULE}
+  BUILD_HINT="run 'make synth' in lab1/ first"
+fi
 
 # The instance path to strip off the VCD's hierarchy so it matches the
 # netlist. This is the single most common thing to get wrong in this flow
@@ -50,7 +84,7 @@ STRIP_PATH=${TB}/${DUT_INST}
 
 if [[ ! -f "$NETLIST" ]]; then
   echo "ERROR: no netlist at $NETLIST"
-  echo "       run 'make synth' in lab1/ first"
+  echo "       $BUILD_HINT"
   exit 1
 fi
 
@@ -58,7 +92,8 @@ fi
 if [[ $SKIP_SIM -eq 0 ]]; then
   echo "### [1/2] gate-level simulation at ${CLK_PS} ps clock period"
   command -v vsim >/dev/null || { echo "ERROR: vsim not on PATH"; exit 1; }
-  vsim -c -do "set CLK_PERIOD_PS ${CLK_PS}; do questa/gate_sim.do"
+  vsim -c -do "set POSTLAYOUT ${POSTLAYOUT}; set CLK_PERIOD_PS ${CLK_PS}; \
+               do questa/gate_sim.do"
 else
   echo "### [1/2] skipped, reusing $VCD_FILE"
 fi
@@ -99,6 +134,10 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libodbc\.so\.2'; then
 fi
 
 echo "### [2/2] PrimePower"
+# pwr_shell exits 0 even when the script died on an error, so delete the
+# report first and insist it comes back. Without this a failed analysis is
+# indistinguishable from a good one until you read the log.
+rm -f "$PWR_DIR/reports/${RPT}_power.rpt"
 if command -v pwr_shell >/dev/null; then
   SHELL_BIN=pwr_shell
 elif command -v pt_shell >/dev/null; then
@@ -113,9 +152,17 @@ $SHELL_BIN \
   -x "set FLOW_ROOT $FLOW_ROOT; \
       set VCD_FILE $VCD_FILE; \
       set NETLIST $NETLIST; \
+      set CONSTRAINTS $CONSTRAINTS; \
+      set SPEF_FILE \"$SPEF_FILE\"; \
       set TOP_MODULE $TOP_MODULE; \
+      set RPT $RPT; \
       set STRIP_PATH $STRIP_PATH" \
   -file scripts/pwr_script.tcl \
-  -output_log_file ${SHELL_BIN}_${TOP_MODULE}.log
+  -output_log_file ${SHELL_BIN}_${RPT}.log
+
+if [[ ! -f "$PWR_DIR/reports/${RPT}_power.rpt" ]]; then
+  echo "ERROR: PrimePower wrote no ${RPT}_power.rpt -- read ${SHELL_BIN}_${RPT}.log"
+  exit 1
+fi
 
 echo "### done -- reports in $PWR_DIR/reports/"

@@ -41,6 +41,10 @@
 # `tc` and not the slow corner timing was signed off at.
 if {![info exists ANALYSIS_MODE]} { set ANALYSIS_MODE tc }
 
+# Report file names. A post-layout run must not overwrite the
+# post-synthesis reports: comparing the two is the exercise.
+if {![info exists RPT]} { set RPT $TOP_MODULE }
+
 # --- PrimePower setup ---------------------------------------------------
 # power_enable_analysis           turn PrimePower on at all
 # power_enable_timing_analysis    use the timing engine for the arrival
@@ -78,7 +82,7 @@ read_vcd $VCD_FILE -strip_path $STRIP_PATH
 
 # --- how much of the design did the activity actually cover? ------------
 report_switching_activity -list_not_annotated -show_pin \
-  > ${REPORTS_PATH}/${TOP_MODULE}_not_annotated.rpt
+  > ${REPORTS_PATH}/${RPT}_not_annotated.rpt
 
 # --- compute ------------------------------------------------------------
 update_power
@@ -89,30 +93,30 @@ update_power
 #   hier      the same, per level of hierarchy -- where the power goes
 #   leaf      per cell. Long, and the only way to find the one net that is
 #             responsible for a surprise.
-report_power -nosplit              > ${REPORTS_PATH}/${TOP_MODULE}_power.rpt
-report_power -nosplit -hierarchy   > ${REPORTS_PATH}/${TOP_MODULE}_hier.rpt
-report_power -nosplit -cell_power -leaf > ${REPORTS_PATH}/${TOP_MODULE}_leaf.rpt
+report_power -nosplit              > ${REPORTS_PATH}/${RPT}_power.rpt
+report_power -nosplit -hierarchy   > ${REPORTS_PATH}/${RPT}_hier.rpt
+report_power -nosplit -cell_power -leaf > ${REPORTS_PATH}/${RPT}_leaf.rpt
 
 # Clock gating is the reason you ran this. This report says how many
 # registers are gated and how many are not -- and every ungated
 # enable-driven register is dynamic power you are paying for nothing.
-report_clock_gating -nosplit       > ${REPORTS_PATH}/${TOP_MODULE}_clock_gating.rpt
+report_clock_gating -nosplit       > ${REPORTS_PATH}/${RPT}_clock_gating.rpt
 
 # --- CSV, for plotting --------------------------------------------------
 source ./scripts/gen_pwr_csv.tcl
-set fp [open ${REPORTS_PATH}/${TOP_MODULE}_power.csv w]
+set fp [open ${REPORTS_PATH}/${RPT}_power.csv w]
 puts $fp "cell,internal,switching,leakage,total,relative"
 gen_pwr_csv $fp $TOP_MODULE
 close $fp
 
 puts ""
 puts "power reports in ${REPORTS_PATH}/"
-puts "  ${TOP_MODULE}_power.rpt          the total -- start here"
-puts "  ${TOP_MODULE}_hier.rpt           where it goes"
-puts "  ${TOP_MODULE}_leaf.rpt           per cell"
-puts "  ${TOP_MODULE}_clock_gating.rpt   how much of the design is gated"
-puts "  ${TOP_MODULE}_not_annotated.rpt  what the VCD did NOT cover"
-puts "  ${TOP_MODULE}_power.csv          the same numbers, for a plot"
+puts "  ${RPT}_power.rpt          the total -- start here"
+puts "  ${RPT}_hier.rpt           where it goes"
+puts "  ${RPT}_leaf.rpt           per cell"
+puts "  ${RPT}_clock_gating.rpt   how much of the design is gated"
+puts "  ${RPT}_not_annotated.rpt  what the VCD did NOT cover"
+puts "  ${RPT}_power.csv          the same numbers, for a plot"
 puts ""
 
 exit

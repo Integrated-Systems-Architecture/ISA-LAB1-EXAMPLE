@@ -410,25 +410,67 @@ the `-gate_clock` difference above — and that is the point §5c was making.
 
 ## 8. After place and route
 
-Everything on this page uses the **synthesis** netlist, which has an ideal
-clock: no tree, no buffers, no skew. The clock tree is typically a large
-fraction of a block's dynamic power, and none of it is in these numbers.
+Everything above this section uses the **synthesis** netlist: an ideal clock
+with no tree in it, capacitance estimated from a wireload model, and a
+zero-delay simulation, so no glitches. Three things missing, all of which
+cost power.
 
-Once `../innovus/` has run, repeat with the post-layout netlist and SDF:
+Once `../innovus/` has run, measure again on what was actually built:
 
 ```bash
-./run_pwr_flow.sh --skip-sim   # after editing gate_sim.do to point at
-                               # ../innovus/artefacts/export/cordic_accel_pnr.{v,sdf}
+make power-postlayout     # from lab1/
 ```
 
-Now the capacitance is extracted from real wires instead of estimated, and
-the clock tree is in the netlist. That is the most accurate number this
-flow can produce.
+or, by hand from this directory:
 
-Innovus can also do the power analysis itself, from the same VCD — *Power →
+```bash
+./run_pwr_flow.sh --postlayout
+```
+
+Three inputs change, and `--postlayout` switches all of them together:
+
+| | `make power` | `make power-postlayout` |
+|---|---|---|
+| netlist | `design_compiler/netlist/<top>.v` | `innovus/artefacts/export/<top>_pnr.v` |
+| delays | none (see §3) | `<top>_pnr.sdf`, annotated |
+| capacitance | wireload estimate | `<top>_pnr.spef`, extracted from the routed wires |
+| clock tree | not in the netlist | in the netlist |
+
+Nothing is overwritten: the VCD is `vcd/<top>_pnr.vcd`, the reports are
+`reports/<top>_pnr_*.rpt`. Run both and compare -- that difference is what
+place and route cost you, and it is the interesting number for your report.
+
+On the shipped CORDIC at 10 ns, typical corner:
+
+```
+                     post-synthesis   post-layout
+clock_network            33.6 %           28.5 %
+register                 13.4 %           13.8 %
+combinational            53.0 %           57.8 %
+Total                  0.821 mW         1.172 mW
+```
+
+43 % more power after layout, and none of it is a mistake: the clock tree is
+real, the wires are real, and the SDF lets the glitches happen. Quote the
+post-layout number, and say which one it is.
+
+Two things to know before you read the numbers:
+
+* **The corner is `typ_1p20V_25C`, not the slow corner timing was signed off
+  at** -- see §5. `make power` and `make power-postlayout` both compile that
+  Liberty into `design_compiler/db/` the first time they need it, with
+  `lc_shell`; synthesis only caches the corner it ran at.
+* **Innovus writes `current_design <top>` at the top of its SDC and
+  PrimeTime refuses it** (`CMD-012`), stopping the SDC read at line 8 --
+  which leaves the design with no clock and reports `clock_network` as
+  0.0000 W. `scripts/init.tcl` strips that one line into
+  `reports/<top>_pnr.sdc.pt` and reads the rest. If you write a post-layout
+  flow of your own elsewhere, this will bite you.
+
+Innovus can also do the power analysis itself, from the same VCD -- *Power →
 Power Analysis → Setup*, then *Run*, with the VCD and the scope
-`/tb_cordic_accel/i_dut`. Same input, same physics, different tool. Running
-both and comparing is a good use of an afternoon.
+`/tb_cordic_accel/i_dut`. Same input, same physics, different tool. Running both and
+comparing is a good use of an afternoon.
 
 ---
 
@@ -441,7 +483,7 @@ power_analysis/
 │   └── gate_sim.do          gate-level sim + SDF + VCD recording
 ├── scripts/
 │   ├── pwr_script.tcl       the PrimePower flow
-│   ├── init.tcl             read libraries, netlist, constraints
+│   ├── init.tcl             read libraries, netlist, constraints, SPEF
 │   ├── set_libs.tcl         which .db, which corner
 │   └── gen_pwr_csv.tcl      per-cell CSV dump
 ├── vcd/                     generated, large, gitignored

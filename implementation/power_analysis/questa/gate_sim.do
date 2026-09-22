@@ -56,9 +56,11 @@ if {![info exists POSTLAYOUT]} { set POSTLAYOUT 0 }
 if {$POSTLAYOUT} {
   set NETLIST  ${LAB}/implementation/innovus/artefacts/export/${TOP}_pnr.v
   set SDF      ${LAB}/implementation/innovus/artefacts/export/${TOP}_pnr.sdf
+  set VCD_NAME ${TOP}_pnr.vcd
 } else {
   set NETLIST  ${LAB}/implementation/design_compiler/netlist/${TOP}.v
   set SDF      ${LAB}/implementation/design_compiler/netlist/${TOP}.sdf
+  set VCD_NAME ${TOP}_syn.vcd
 }
 set VENDOR   ${LAB}/vendor/pulp_platform
 set VECDIR   ${LAB}/vectors/
@@ -193,7 +195,11 @@ foreach f $TB_SRC {
 #
 # To experiment with the synthesis SDF anyway:
 #     vsim -c -do "set USE_SDF 1; do questa/gate_sim.do"
-if {![info exists USE_SDF]} { set USE_SDF 0 }
+# Post-layout defaults to SDF ON: that netlist and that SDF come from the
+# same Innovus session, they annotate cleanly, and the delays are the point
+# of running post-layout at all. Post-synthesis defaults to OFF for the
+# reason above. Either default can be overridden on the command line.
+if {![info exists USE_SDF]} { set USE_SDF $POSTLAYOUT }
 
 set sdf_args {}
 if {$USE_SDF} {
@@ -233,8 +239,8 @@ vsim -c -t 1ps \
 # behavioural memory model and the bus drivers do not exist in silicon and
 # their toggling is not power.
 file mkdir vcd
-echo "### recording VCD to vcd/${TOP}_syn.vcd"
-vcd file vcd/${TOP}_syn.vcd
+echo "### recording VCD to vcd/${VCD_NAME}"
+vcd file vcd/${VCD_NAME}
 vcd add -r /${TB}/${DUT_INST}/*
 
 # Run to the end of the stimulus. The testbench calls $finish when it is

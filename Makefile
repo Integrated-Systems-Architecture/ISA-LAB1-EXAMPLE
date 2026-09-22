@@ -31,6 +31,12 @@ NANGLES   ?= 64
 CLK_PERIOD    ?= 10.0
 # PVT corner: slow_1p08V_125C (setup sign-off), typ_1p20V_25C, fast_1p32V_m40C
 SG13G2_CORNER ?= slow_1p08V_125C
+# The corner the POWER analysis uses, which is deliberately not the one you
+# sign timing off at: dynamic power goes as C*V^2*f, so 1.08 V under-reports
+# it, and leakage roughly doubles every 10 C, so 125 C over-reports that.
+# Typical is what the chip on a desk does. See
+# implementation/power_analysis/scripts/set_libs.tcl.
+PWR_CORNER    ?= typ_1p20V_25C
 # where the IHP SG13G2 open PDK is installed
 IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
 # Place and route knobs (implementation/innovus/scripts/globals.tcl)
@@ -92,6 +98,7 @@ help:
 	@echo "  make pnr-clean     remove place-and-route outputs"
 	@echo "  make power         gate-level sim + PrimePower switching-activity power"
 	@echo "  make power-sim     just the gate-level simulation (writes the VCD)"
+	@echo "  make power-postlayout  the same, on the Innovus netlist + SDF + SPEF"
 	@echo "  make power-clean   remove VCDs and power reports"
 	@echo "  make waves         Verilator run with FST tracing"
 	@echo "  make model-check   accuracy of the golden model vs math.cos/sin"
@@ -264,7 +271,7 @@ pnr-clean:
 # Needs both environments: vsim on PATH and
 # source /eda/scripts/init_design_vision for pt_shell.
 .PHONY: power
-power: $(SYNDIR)/netlist/cordic_accel.v vectors
+power: $(SYNDIR)/netlist/cordic_accel.v vectors $(PWR_DB)
 	cd $(PWRDIR) && ./run_pwr_flow.sh --clk-ps $(PWR_CLK_PS)
 
 # Just the simulation. Useful while you are still getting the VCD scope and
@@ -272,6 +279,44 @@ power: $(SYNDIR)/netlist/cordic_accel.v vectors
 .PHONY: power-sim
 power-sim: $(SYNDIR)/netlist/cordic_accel.v vectors
 	cd $(PWRDIR) && vsim -c -do "set CLK_PERIOD_PS $(PWR_CLK_PS); do questa/gate_sim.do"
+
+# PrimePower reads the same compiled .db Design Compiler does, at the
+# typical corner -- and `make synth' only ever caches the corner it
+# synthesised at, which is the slow one. So compile that one Liberty on its
+# own, once, with Library Compiler. Same output directory, same cache: the
+# power flow and the synthesis flow then share the file.
+PWR_DB := $(SYNDIR)/db/sg13g2_stdcell_$(PWR_CORNER).db
+
+$(PWR_DB):
+	@mkdir -p $(SYNDIR)/db
+	lc_shell -x "read_lib $(IHP_PDK_ROOT)/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_$(PWR_CORNER).lib; \
+	             write_lib sg13g2_stdcell_$(PWR_CORNER) -format db -output $(PWR_DB); quit"
+	@test -f $(PWR_DB) || { echo "lc_shell did not write $(PWR_DB)"; exit 1; }
+
+# --- Post-LAYOUT power -------------------------------------------------------
+# The same two steps on the Innovus netlist instead of the Design Compiler
+# one, and it is a different measurement, not a refinement of the same one:
+#
+#   make power              ideal clock, no clock tree in the netlist,
+#                           estimated wire capacitance, zero-delay
+#                           simulation -- so no glitches. A lower bound.
+#   make power-postlayout   the routed netlist WITH its clock tree, delays
+#                           back-annotated from the Innovus SDF (glitches
+#                           happen), and capacitance read from the SPEF
+#                           Innovus extracted from the real wires.
+#
+# The clock tree alone is often a large share of a block's dynamic power and
+# none of it exists before place and route. Report the post-layout number,
+# and use the pair to say what layout cost you.
+#
+# Separate VCDs (vcd/<top>_pnr.vcd) and separate reports
+# (reports/<top>_pnr_*.rpt), so running both leaves both to compare.
+.PHONY: power-postlayout
+power-postlayout: $(PNRDIR)/artefacts/export/cordic_accel_pnr.v vectors $(PWR_DB)
+	cd $(PWRDIR) && ./run_pwr_flow.sh --postlayout --clk-ps $(PWR_CLK_PS)
+
+$(PNRDIR)/artefacts/export/cordic_accel_pnr.v:
+	@echo "no post-layout netlist yet -- run 'make pnr-all' first"; exit 1
 
 # Just the analysis, on the VCD that is already there.
 .PHONY: power-report
