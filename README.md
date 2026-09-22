@@ -9,7 +9,7 @@ placed-and-routed block with a measured power number.
 | Lab 0 | profile the provided apps and work out which kernel is worth accelerating | |
 | **Lab 1** | implement the accelerator standalone, simulate it, synthesise it, place and route it, measure its power | *this directory* |
 | Lab 2 | optimize it (retiming, pipelining, folding, arithmetic) and compare PPA with Lab 1 | |
-| Lab 3 | integrate it into X-HEEP over CV-XIF or OBI+REG, write the C driver, measure the real speedup | |
+| Lab 3 | integrate it into X-HEEP over OBI+REG, write the C driver, measure the real speedup | |
 
 Lab 0 ended with a *candidate*. Lab 1 ends with **numbers**: a maximum
 frequency, an area in µm², and a power figure in mW at a stated corner and
@@ -24,16 +24,69 @@ compare against, so measure carefully and write down how you measured.
    that live on the server.
 2. **[TUTORIAL.md](TUTORIAL.md)** — a guided run of the whole flow on the
    accelerator that ships here, with the output you should see at each stage.
-3. **TODO.md** — what you must do and hand in. *(Being rewritten for the
-   CORDIC-based lab; the version in the tree still describes the older
-   matmul example. Use TUTORIAL.md until it lands.)*
+3. **The assignment is not here.** This directory is the worked reference, not
+   your work. What you must build and hand in is in the lab1 template:
+   [ASSIGNMENT.md](../lab1/ASSIGNMENT.md) and [REPORT.md](../lab1/REPORT.md).
+   *(`TODO.md` in this tree is a leftover describing the older matmul example
+   — ignore it.)*
 
-Quick check that your setup works:
+## The whole flow, in order
+
+Everything below runs on the **ISA server** (`ssh -X isa`). Copy it a line at a
+time and read what comes back; every stage prints where it put its output.
 
 ```bash
-make vendor && make regs && make sim     # -> TEST PASSED
-make help                                # every target
+# --- once per shell: the environments -------------------------------------
+source /oss-tools/init.sh                    # python, fusesoc, verilator, klayout, $IHP_PDK_ROOT
+source /eda/scripts/init_design_vision       # dc_shell, lc_shell, pt_shell/pwr_shell
+source /eda/scripts/init_cadence_2020-21     # innovus   -- 2020-21, NOT 2021-22
+source /eda/scripts/init_questa_core_prime   # vsim
+
+# --- once per clone --------------------------------------------------------
+make vendor          # fetch common_cells, tech_cells_generic, register_interface, obi
+make regs            # reggen: data/cordic_accel.hjson -> CSR block + C header
+
+# --- RTL -------------------------------------------------------------------
+make sim             # Verilator, self-checking        -> TEST PASSED
+make questa          # QuestaSim, the same testbench   -> TEST PASSED
+
+# --- silicon ---------------------------------------------------------------
+make synth           # Design Compiler  -> netlist, area, f_max        (~2 min)
+make pnr-all         # Innovus: route, then optimise in a 2nd session  (~7 min)
+make power           # gate sim + PrimePower, synthesis netlist        (~3 min)
+make power-postlayout # the same on the routed netlist + SDF + SPEF    (~4 min)
+
+# --- look at it ------------------------------------------------------------
+make gds             # KLayout on the final layout  (needs ssh -X)
+make pnr-gui         # Innovus with the GUI open    (needs ssh -X)
+make help            # every target, every knob, current values
 ```
+
+Long runs survive a dropped connection only inside `tmux` — see
+[SETUP.md](SETUP.md).
+
+## Where the outputs land
+
+No stage prints its reports to the terminal: FuseSoC captures the tool's
+output, and every script writes files instead. This table is where to look.
+
+| after | file | what it tells you |
+|---|---|---|
+| `make synth` | `implementation/design_compiler/reports/synth.log` | the **whole dc_shell transcript** — read this when synthesis misbehaves |
+| | `.../reports/qor.rpt` | slack, area, cell count. Start here |
+| | `.../reports/timing.rpt`, `timing_top10.rpt` | the critical path, and the ten worst |
+| | `.../reports/area.rpt`, `power_estimate.rpt` | area by hierarchy; a *guessed* power number (see below) |
+| | `.../netlist/cordic_accel.{v,sdf,sdc,ddc}` | the gate-level netlist and its timing |
+| `make pnr-all` | `implementation/innovus/artefacts/reports/08_export.*` | final setup and hold timing, DRC, gate count |
+| | `.../artefacts/export/cordic_accel_pnr.{v,sdf,spef,sdc}` | the routed design, for the power run |
+| | `.../artefacts/export/cordic_accel.gds` | the layout |
+| | `.../artefacts/innovus.log`, `pnr_opt.log` | the two Innovus sessions |
+| `make power` | `implementation/power_analysis/reports/cordic_accel_power.rpt` | switching / internal / leakage, post-synthesis |
+| `make power-postlayout` | `.../reports/cordic_accel_pnr_power.rpt` | the same, post-layout — **this is the one to report** |
+| | `.../reports/*_not_annotated.rpt` | how much of the design the VCD actually covered. Read it |
+
+They are all gitignored. That is why `git status` stays clean after a run and
+why your editor may hide them — the files are there.
 
 ## What ships here, and why it already works
 
@@ -82,12 +135,14 @@ before you ever run the scripts.
 | **power** | [`implementation/power_analysis/`](implementation/power_analysis/README.md) | watts | QuestaSim + PrimePower |
 
 ```bash
-make sim        # Verilator, self-checking
-make questa     # QuestaSim, same testbench
-make synth      # Design Compiler       (server only)
-make pnr-all    # Innovus, route + opt  (server only)
-make pnr-gui    # the same with the GUI (server only, needs ssh -X)
-make power      # gate sim + PrimePower (server only)
+make sim              # Verilator, self-checking
+make questa           # QuestaSim, same testbench
+make synth            # Design Compiler         (server only)
+make pnr-all          # Innovus, route + opt    (server only)
+make pnr-gui          # the same with the GUI   (server only, needs ssh -X)
+make power            # gate sim + PrimePower, synthesis netlist (server only)
+make power-postlayout # the same on the routed netlist          (server only)
+make gds              # KLayout on the layout   (server only, needs ssh -X)
 ```
 
 Every stage's scripts are split **one file per step**, so you can change the
@@ -166,16 +221,21 @@ what "working" looks like:
 | clock gates | 1 architectural (around the rotator) + 18 inserted by `-gate_clock` |
 | place and route | core 261.6 × 260.8 µm at 60 % utilisation, 8050 gates, 43 821 µm² |
 | final timing | setup **+0.259 ns**, hold **−0.002 ns**, **0 DRC violations** |
-| power | **0.813 mW** at 100 MHz, typ corner, 100 % of 2577 nets annotated |
+| power, post-synthesis | **0.821 mW** at 100 MHz, typ corner |
+| power, post-layout | **1.172 mW** — same workload, same corner, real clock tree and real wires |
 
 And the one number worth arguing about, from the power breakdown:
 
-| | share of total power |
-|---|---|
-| combinational | 52 % |
-| **clock network** | **34 %** |
-| registers | 14 % |
-| leakage | 0.06 % |
+| | post-synthesis | post-layout |
+|---|---|---|
+| combinational | 53 % | 58 % |
+| **clock network** | **34 %** | **28 %** |
+| registers | 13 % | 14 % |
+| leakage | 0.06 % | 0.04 % |
+
+43 % more total power after place and route, and none of it is an error: the
+clock tree is real, the wires have real capacitance, and the SDF lets glitches
+happen. Report the post-layout number and say that is what it is.
 
 A third of this block's power is the clock network — and that is *before*
 place and route builds a real clock tree, which only makes it bigger. No
@@ -185,6 +245,87 @@ at the root does remove it. That is §5c of the synthesis README, measured.
 
 Your own accelerator will differ, and that is the point. Report the numbers
 you measured, with the corner and the clock period next to them.
+
+## When it breaks
+
+Every entry here is a failure someone has actually hit on this flow, with the
+message it prints. Read the message first; the tools are not subtle, they are
+just quiet about where they wrote it.
+
+**"Synthesis printed nothing / where is the log?"**
+FuseSoC captures the tool's stdout, so `make synth` shows only `INFO: Running`.
+The full dc_shell transcript is `implementation/design_compiler/reports/synth.log`
+(48 kB of it). `build/*/synth-design_compiler/command.log` is Design Compiler's
+command echo, not the run log. Both are gitignored, so `git status` and a
+gitignore-aware editor will not show them.
+
+**`cannot find .../sg13g2_stdcell_slow_1p08V_125C.lib -- is IHP_PDK_ROOT set correctly?`**
+The PDK is not where the scripts expect. `source /oss-tools/init.sh` exports
+`IHP_PDK_ROOT`; check with `ls $IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/lib/`.
+Synthesis now **stops** on this. It used to continue, silently mapping to
+Design Compiler's built-in `gtech` library and producing a full set of reports
+with zero area and meaningless slack — if you ever see `**SEQGEN**` or
+`*ADD_UNS_OP*` in `reference.rpt`, that is what happened.
+
+**`make synth` says nothing failed but there is no netlist**
+It does fail now: the target checks for the netlist and stops. The reason the
+check has to exist is that edalize pipes dc_shell into `tee`, and a pipeline's
+exit status is `tee`'s, which is always 0.
+
+**Innovus dies immediately: `*** CRASHED *** [signal 11]`**
+You sourced `init_cadence_2021-22`. Innovus 21.1 needs AVX, and isaserver's
+CPU (`QEMU Virtual CPU`, flags `sse4_2 popcnt` only) does not have it — it
+segfaults right after the licence checkout, even on a two-line script. Use
+`source /eda/scripts/init_cadence_2020-21`.
+
+**`make pnr` finishes but hold is violated**
+Expected: `make pnr` routes, `make pnr-opt` fixes hold in a **second** Innovus
+session. `make pnr-all` does both. On 20.11 both `opt_design -post_route` and
+`route_eco -fix_drc` fail in the session that did the routing — see the header
+of `implementation/innovus/scripts/run_pnr_opt.tcl`. Even after `pnr-opt` the
+shipped design ends at −0.002 ns hold on two paths.
+
+**`missing .../sg13g2_stdcell_typ_1p20V_25C.db -- run make synth`**
+Power analysis runs at the **typical** corner; synthesis only caches the corner
+it synthesised at (`slow`). The Makefile now compiles that one Liberty with
+`lc_shell` on demand (`$(PWR_DB)`), so this should no longer appear — if it
+does, `lc_shell` is not on your `PATH`: `source /eda/scripts/init_design_vision`.
+
+**Power report says `clock_network 0.0000 W`**
+The SDC was not read, so PrimePower has no clock and no idea what "per second"
+means. Post-layout this was Innovus writing `current_design <top>` at the top
+of its SDC, which PrimeTime rejects (`Error: extra positional option`, CMD-012)
+and then stops reading; `scripts/init.tcl` strips that line now. If it comes
+back, read `pwr_shell_*.log` and look for `Errors reading SDC file`.
+
+**`report_switching_activity` says large parts are not annotated**
+The VCD scope or `-strip_path` is wrong, and PrimePower silently fell back to a
+default toggle rate — the guess the whole flow exists to replace. The testbench
+must instantiate the DUT as `i_dut`; check
+`reports/*_not_annotated.rpt` before you believe any power number.
+
+**`pt_shell_exec: error while loading shared libraries: libodbc.so.2`**
+unixODBC is not installed on the machine. `run_pwr_flow.sh` symlinks the copy
+that ships inside the VCS installation into `~/.local/eda-libs` and puts only
+that one file on `LD_LIBRARY_PATH`. Do not put conda's `lib/` there instead —
+the Synopsys tools then load conda's `libstdc++` and die with
+`version CXXABI_1.3.15 not found`.
+
+**`klayout: command not found`, or the layout opens in meaningless colours**
+`source /oss-tools/init.sh` first. The colours come from the PDK's layer
+properties, `$IHP_PDK_ROOT/libs.tech/klayout/tech/sg13g2.lyp`, which `make gds`
+passes with `-l`; without it every layer is an anonymous number.
+
+**Questa: `Module 'tb_cordic_accel' does not have a timeunit/timeprecision
+specification in effect`**
+Missing `-timescale 1ns/1ps`. The `sim_questa` target in the `.core` file and
+`questa/gate_sim.do` both set it; a hand-rolled `vlog` will not.
+
+**A gate-level simulation fails its self-check, RTL passes**
+Post-synthesis, with the Design Compiler SDF annotated, this is a known
+unresolved problem — which is why `make power` runs at zero delay and the
+post-layout run (with the Innovus SDF) is the one that both annotates and
+passes. See the long comment in `questa/gate_sim.do`.
 
 ## Tools you must understand (not just invoke)
 
@@ -204,10 +345,21 @@ You will be asked to explain these, not just show that you ran them:
 
 ## Reference material
 
-The course cookbooks live at
+Three kinds of reading. First, the **step-by-step guides in this repository** —
+one per implementation stage, written to be worked through a command at a time
+in the tool's own shell before you run the scripted version:
+
+| | |
+|---|---|
+| [implementation/design_compiler/README.md](implementation/design_compiler/README.md) | libraries, constraints, `compile_ultra`, the reports, clock gating, memories, IO pads |
+| [implementation/innovus/README.md](implementation/innovus/README.md) | floorplan, power grid, placement, CTS, routing, optimisation, export |
+| [implementation/power_analysis/README.md](implementation/power_analysis/README.md) | the VCD, PrimePower, post-synthesis vs post-layout power |
+| [TUTORIAL.md](TUTORIAL.md) | this accelerator through all of it, with the output at each stage |
+
+Second, the **course cookbooks**, at
 <https://github.com/Integrated-Systems-Architecture/ISA-BOOKS> (in the course
 repository they are the `books/` submodule — `git submodule update --init
-books`).
+books`, sources and built PDFs).
 
 | Question | Where |
 |----------|-------|
@@ -218,7 +370,11 @@ books`).
 | VHDL/SystemVerilog side by side, coding style | *Design Cookbook*, ch. 1–4 |
 | git, tags and releases for the group | *Git Cookbook*, ch. 1–3 |
 
-The course's own synthesis and place-and-route notes are in
+Third, the **technology's own documentation** — the standard cell list, with
+each cell's function, drive strengths and pin names, in
+`$IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/doc/`.
+
+The course's older synthesis and place-and-route notes are in
 `ISA_design_flow_documents/` at the top of this repository. They target
 Nangate 45 and the legacy Innovus command set; the READMEs here target SG13G2
 and Stylus, and each step names the legacy command alongside so you can read
@@ -231,7 +387,7 @@ The PDK ships its own documentation in
 
 ```
 README.md SETUP.md TUTORIAL.md   read them in that order
-TODO.md                          the assignment (being rewritten)
+                                 the assignment is in ../lab1/ASSIGNMENT.md
 
 rtl/            cordic_pkg.sv  cordic_rot.sv  cordic_accel.sv
                 cordic_accel_reg_{pkg,top}.sv   generated by `make regs`

@@ -410,6 +410,38 @@ guesses; here you measure.
 
 ---
 
+### Then measure it again, after layout
+
+Everything above uses the **synthesis** netlist: ideal clock, no clock tree,
+wireload capacitance, zero-delay simulation. Once `make pnr-all` has run:
+
+```bash
+make power-postlayout
+```
+
+Same testbench, same workload, same corner — but the routed netlist with its
+clock tree, delays annotated from the Innovus SDF (so glitches happen) and
+capacitance from the extracted SPEF. It writes `vcd/cordic_accel_pnr.vcd` and
+`reports/cordic_accel_pnr_*.rpt`, so the post-synthesis run stays there to
+compare against:
+
+```
+                     post-synthesis   post-layout
+clock_network            33.6 %           28.5 %
+register                 13.4 %           13.8 %
+combinational            53.0 %           57.8 %
+Total                  0.821 mW         1.172 mW
+```
+
+43 % more, and all of it real. The post-layout number is the one that belongs
+in your report, with the corner and the clock period written next to it.
+
+### And look at what you built
+
+```bash
+make gds        # KLayout, PDK layer properties loaded (needs ssh -X)
+```
+
 ## 7. What to do when a stage fails
 
 The failure modes are stage-shaped, and the first error is always the real one:
@@ -419,10 +451,18 @@ The failure modes are stage-shaped, and the first error is always the real one:
 | `TEST FAILED`, a few mismatches | your RTL; compare against `model/cordic_golden.py` |
 | `TEST FAILED`, all mismatches | the vectors, or `SRC`/`DST`/`N` programming |
 | synthesis finishes in 3 s, empty netlist | `reports/synth.log` from the **top** |
-| netlist full of `GTECH` | the library setup failed; `target_library` was empty |
+| `ERROR: cannot find ... .lib` and no reports | `IHP_PDK_ROOT`. `source /oss-tools/init.sh` |
+| netlist full of `GTECH`, zero area | the library setup failed. The script stops on this now; if you see it, you ran an old copy |
+| Innovus `*** CRASHED *** [signal 11]` at startup | you sourced `init_cadence_2021-22`. Use `2020-21` (21.1 needs AVX this host lacks) |
 | Innovus stops in `init` | `artefacts/reports/01_init.log`, grep for `ERROR` |
 | routing will not converge | congestion. Lower `PNR_UTIL`, back in the floorplan |
+| hold still violated after `make pnr` | run `make pnr-opt` — it is a second session on purpose |
 | power looks like the synthesis estimate | `*_not_annotated.rpt`: the VCD strip path is wrong |
+| `clock_network 0.0000 W` | the SDC was not read: `pwr_shell_*.log`, look for `Errors reading SDC file` |
+| `missing ..._typ_1p20V_25C.db` | `lc_shell` not on `PATH`: `source /eda/scripts/init_design_vision` |
+
+[README.md](README.md#when-it-breaks) has the long version of this list, with
+the exact messages and why each one happens.
 
 Reading a 20 000-line log from the bottom is the single most common way to
 waste an hour. The last two hundred errors are consequences of the first one.
@@ -455,10 +495,13 @@ make pnr-all                                     # both -- the usual one
 make pnr-gui                                     # the flow with the GUI (ssh -X)
 make pnr-clean
 
-make power [PWR_CLK_PS=5000]             # gate sim + PrimePower
+make power [PWR_CLK_PS=5000]             # gate sim + PrimePower, synthesis netlist
+make power-postlayout                    # the same, on the Innovus netlist + SDF + SPEF
 make power-sim                           # just the simulation
 make power-report                        # just the analysis
 make power-clean
+
+make gds                                 # KLayout on the final layout (ssh -X)
 
 make clean / distclean
 ```

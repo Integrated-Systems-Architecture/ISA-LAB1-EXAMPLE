@@ -8,9 +8,8 @@ Synthesis (baseline PPA) is the second half of Lab 1 — see the synth guide onc
 your RTL passes simulation here.
 
 > This scaffold uses **matmul** over an **OBI + CSR** interface as the worked
-> example. If you picked a different app or the CV-XIF interface, keep the same
-> structure (golden vectors → transactors → self-checking TB) and adapt the
-> pieces. CV-XIF transactors come in a later drop.
+> example. If you picked a different app, keep the same structure (golden
+> vectors → transactors → self-checking TB) and adapt the pieces.
 
 ---
 

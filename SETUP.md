@@ -64,6 +64,13 @@ source /eda/scripts/init_cadence_2020-21   # Innovus
 source /eda/scripts/init_questa_core_prime # QuestaSim
 ```
 
+> **Innovus: 2020-21, not 2021-22.** There is an `init_cadence_2021-22` next to
+> it and it does not work on this machine. Innovus 21.1 requires AVX;
+> isaserver's CPU is a `QEMU Virtual CPU` whose flags are `sse4_2 popcnt` and
+> nothing else, so the tool segfaults immediately after checking out its
+> licence — `*** CRASHED *** [signal 11]`, even on a two-line script. The
+> Makefile's `pnr` targets assume 20.11 anyway.
+
 Check what each one gave you:
 
 ```bash
@@ -91,10 +98,17 @@ source /eda/scripts/init_questa_core_prime
 
 ### 4. The PDK
 
-Lab 1 targets **IHP SG13G2**, a 130 nm open PDK. Point at it:
+Lab 1 targets **IHP SG13G2**, a 130 nm open PDK. `/oss-tools/init.sh` already
+exports it:
 
 ```bash
-export IHP_PDK_ROOT=/oss-tools/pdk/ihp-sg13g2
+echo $IHP_PDK_ROOT       # /oss-tools/pdk/ihp-sg13g2
+```
+
+Set it yourself only if you are running somewhere else:
+
+```bash
+export IHP_PDK_ROOT=/path/to/ihp-sg13g2
 ```
 
 Check it is really there — these four directories are what the flow reads:
@@ -114,9 +128,20 @@ ls $IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/
 | `verilog/` | behavioural cell models | QuestaSim, gate-level simulation |
 | `gds/` | the layout | Innovus stream-out |
 
-If `IHP_PDK_ROOT` is unset the flow falls back to `/oss-tools/pdk/ihp-sg13g2`, so on
-the server you can usually leave it alone. Set it if you are told the PDK has
-moved, or if you are running somewhere else.
+One directory sits outside `libs.ref/` and matters for `make gds`:
+
+```bash
+ls $IHP_PDK_ROOT/libs.tech/klayout/tech/sg13g2.lyp   # KLayout layer properties
+```
+
+Without that file a GDS opens in KLayout as anonymous numbered layers in
+colours KLayout invented. KLayout itself (0.28.17) is installed system-wide on
+the server, so `which klayout` answers `/usr/bin/klayout` with no environment
+to source.
+
+If `IHP_PDK_ROOT` is unset the flow falls back to the same
+`/oss-tools/pdk/ihp-sg13g2`, so on the server you can leave it alone. Set it if
+you are told the PDK has moved, or if you are running somewhere else.
 
 ### 5. Get your repository and check the flow
 
