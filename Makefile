@@ -32,7 +32,7 @@ CLK_PERIOD    ?= 10.0
 # PVT corner: slow_1p08V_125C (setup sign-off), typ_1p20V_25C, fast_1p32V_m40C
 SG13G2_CORNER ?= slow_1p08V_125C
 # where the IHP SG13G2 open PDK is installed
-IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2
+IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
 # Place and route knobs (implementation/innovus/scripts/globals.tcl)
 # target core utilisation, 0..1
 PNR_UTIL      ?= 0.60

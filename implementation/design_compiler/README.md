@@ -30,7 +30,7 @@ source /eda/scripts/init_design_vision
 This puts `dc_shell-xg-t`, `design_vision`, `lc_shell` and `vcd2saif` on your
 `PATH`. Nothing below works without it.
 
-**Point at the PDK.** The scripts default to `/oss-tools/pdk/ihp-sg13g2`; if yours
+**Point at the PDK.** The scripts default to `/oss-tools/pdk/ihp-sg13g2/ihp-sg13g2`; if yours
 is elsewhere, say so:
 
 ```bash
