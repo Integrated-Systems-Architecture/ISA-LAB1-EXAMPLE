@@ -55,7 +55,7 @@ remove_design -all
 if {[info exists ::env(IHP_PDK_ROOT)]} {
   set PDK [string trim $::env(IHP_PDK_ROOT)]
 } else {
-  set PDK /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
+  set PDK /oss-tools/pdk/ihp-sg13g2
 }
 set PDK_LIB ${PDK}/libs.ref
 

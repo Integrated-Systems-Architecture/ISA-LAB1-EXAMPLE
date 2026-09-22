@@ -38,7 +38,7 @@ SG13G2_CORNER ?= slow_1p08V_125C
 # implementation/power_analysis/scripts/set_libs.tcl.
 PWR_CORNER    ?= typ_1p20V_25C
 # where the IHP SG13G2 open PDK is installed
-IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
+IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2
 # Place and route knobs (implementation/innovus/scripts/globals.tcl)
 # target core utilisation, 0..1
 PNR_UTIL      ?= 0.60
@@ -96,6 +96,7 @@ help:
 	@echo "  make pnr-opt       post-route optimisation + export (2nd Innovus session)"
 	@echo "  make pnr-all       make pnr followed by make pnr-opt"
 	@echo "  make pnr-clean     remove place-and-route outputs"
+	@echo "  make gds           open the layout in KLayout (needs ssh -X)"
 	@echo "  make power         gate-level sim + PrimePower switching-activity power"
 	@echo "  make power-sim     just the gate-level simulation (writes the VCD)"
 	@echo "  make power-postlayout  the same, on the Innovus netlist + SDF + SPEF"
@@ -256,6 +257,19 @@ pnr-all: pnr pnr-opt
 
 $(SYNDIR)/netlist/cordic_accel.v:
 	@echo "no netlist yet -- run 'make synth' first"; exit 1
+
+# --- Look at the layout -------------------------------------------------------
+# The GDS Innovus wrote, in KLayout, with the PDK's layer properties loaded --
+# without the .lyp every layer is an anonymous number in a colour KLayout made
+# up. Needs X11 (`ssh -X isa`), and KLayout from the shared install.
+.PHONY: gds
+gds: $(PNRDIR)/artefacts/export/cordic_accel.gds
+	@command -v klayout >/dev/null || { \
+	  echo "klayout not on PATH -- source /oss-tools/init.sh"; exit 1; }
+	klayout -l $(IHP_PDK_ROOT)/libs.tech/klayout/tech/sg13g2.lyp $<
+
+$(PNRDIR)/artefacts/export/cordic_accel.gds:
+	@echo "no GDS yet -- run 'make pnr-all' first"; exit 1
 
 .PHONY: pnr-clean
 pnr-clean:

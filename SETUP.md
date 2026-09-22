@@ -94,7 +94,7 @@ source /eda/scripts/init_questa_core_prime
 Lab 1 targets **IHP SG13G2**, a 130 nm open PDK. Point at it:
 
 ```bash
-export IHP_PDK_ROOT=/oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
+export IHP_PDK_ROOT=/oss-tools/pdk/ihp-sg13g2
 ```
 
 Check it is really there — these four directories are what the flow reads:
@@ -114,7 +114,7 @@ ls $IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/
 | `verilog/` | behavioural cell models | QuestaSim, gate-level simulation |
 | `gds/` | the layout | Innovus stream-out |
 
-If `IHP_PDK_ROOT` is unset the flow falls back to `/oss-tools/pdk/ihp-sg13g2/ihp-sg13g2`, so on
+If `IHP_PDK_ROOT` is unset the flow falls back to `/oss-tools/pdk/ihp-sg13g2`, so on
 the server you can usually leave it alone. Set it if you are told the PDK has
 moved, or if you are running somewhere else.
 

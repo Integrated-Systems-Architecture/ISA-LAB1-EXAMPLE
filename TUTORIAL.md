@@ -12,7 +12,7 @@ source /oss-tools/init.sh                    # on isaserver
 source /eda/scripts/init_design_vision       # Design Compiler, PrimePower
 source /eda/scripts/init_cadence_2020-21     # Innovus
 source /eda/scripts/init_questa_core_prime   # QuestaSim
-export IHP_PDK_ROOT=/oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
+export IHP_PDK_ROOT=/oss-tools/pdk/ihp-sg13g2
 ```
 
 `make help` lists every target.

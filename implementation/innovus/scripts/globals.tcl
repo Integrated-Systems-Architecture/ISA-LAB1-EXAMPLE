@@ -8,7 +8,7 @@
 #  block and it will still be the file you edit on a 500 000-cell chip.
 #
 #  Overridable from the shell:
-#    IHP_PDK_ROOT    where the PDK lives          (default /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2)
+#    IHP_PDK_ROOT    where the PDK lives          (default /oss-tools/pdk/ihp-sg13g2)
 #    SG13G2_CORNER   the setup corner             (default slow_1p08V_125C)
 #    PNR_UTIL        target core utilisation      (default 0.60)
 #    PNR_ASPECT      core aspect ratio            (default 1.00)
@@ -36,7 +36,7 @@ set design(default_sdc) $design(SYN_DIR)/netlist/$design(TOPLEVEL).sdc
 if {[info exists ::env(IHP_PDK_ROOT)]} {
   set design(PDK) [string trim $::env(IHP_PDK_ROOT)]
 } else {
-  set design(PDK) /oss-tools/pdk/ihp-sg13g2/ihp-sg13g2
+  set design(PDK) /oss-tools/pdk/ihp-sg13g2
 }
 set design(PDK_LIB) $design(PDK)/libs.ref
 
