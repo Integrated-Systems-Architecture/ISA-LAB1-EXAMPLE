@@ -16,6 +16,18 @@
 # Run it by hand first, one command at a time, following the README. Only
 # then use the script: a script you cannot read is a script you cannot debug.
 
+# A fatal error has to take dc_shell down with it. `error' alone does not:
+# the script is pulled in with Tcl's `source', so dc_shell prints the message
+# and carries on to the next command. A missing PDK then leaves
+# target_library empty, synthesis falls back to the built-in `gtech' library,
+# and you get a complete set of reports describing a netlist of generic
+# gates -- zero area, meaningless slack. (`sh_script_stop_severity' does not
+# help here either: it governs `include', not `source'.)
+proc die {msg} {
+  puts "ERROR: $msg"
+  exit 1
+}
+
 # --- defaults for the standalone run ------------------------------------
 if {![info exists TOP_MODULE]}  { set TOP_MODULE  cordic_accel }
 if {![info exists SCRIPT_DIR]}  { set SCRIPT_DIR  scripts }
@@ -43,7 +55,7 @@ remove_design -all
 if {[info exists ::env(IHP_PDK_ROOT)]} {
   set PDK [string trim $::env(IHP_PDK_ROOT)]
 } else {
-  set PDK /eda/dk/ihp-sg13g2
+  set PDK /oss-tools/pdk/ihp-sg13g2
 }
 set PDK_LIB ${PDK}/libs.ref
 
@@ -85,7 +97,7 @@ sh mkdir -p ${DB_DIR}
 #   * if this proc fails, STDCELL_DB is never set, `target_library' stays
 #     empty, and dc_shell quietly falls back to its built-in `gtech'
 #     library. The synthesis then "works" and produces a netlist of generic
-#     gates that mean nothing. So: check, and stop.
+#     gates that mean nothing. So: check, and stop -- `die', not `error'.
 proc ensure_db {lib_name lib_path db_dir} {
   set db ${db_dir}/${lib_name}.db
   if {[file exists $db]} {
@@ -93,7 +105,7 @@ proc ensure_db {lib_name lib_path db_dir} {
     return $db
   }
   if {![file exists $lib_path]} {
-    error "cannot find $lib_path -- is IHP_PDK_ROOT set correctly?"
+    die "cannot find $lib_path -- is IHP_PDK_ROOT set correctly?"
   }
   puts "libraries: compiling $lib_path -> $db (needs a Library Compiler licence)"
   if {[catch {enable_write_lib_mode} msg]} {
@@ -102,7 +114,7 @@ proc ensure_db {lib_name lib_path db_dir} {
   read_lib $lib_path
   write_lib $lib_name -format db -output $db
   if {![file exists $db]} {
-    error "failed to write $db.\n\
+    die "failed to write $db.\n\
            Compile it outside dc_shell instead:\n\
            lc_shell -x \"read_lib $lib_path; write_lib $lib_name -format db -output $db; quit\""
   }
@@ -137,7 +149,7 @@ set link_library      [concat [list "*" ${STDCELL_DB} "dw_foundation.sldb"] ${MA
 set synthetic_library [list "dw_foundation.sldb"]
 
 if {[llength $target_library] == 0} {
-  error "target_library is empty -- dc_shell would silently synthesise to gtech"
+  die "target_library is empty -- dc_shell would silently synthesise to gtech"
 }
 
 puts "technology: IHP SG13G2, corner ${CORNER}"

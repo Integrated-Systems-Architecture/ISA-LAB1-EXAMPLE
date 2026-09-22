@@ -32,7 +32,7 @@ CLK_PERIOD    ?= 10.0
 # PVT corner: slow_1p08V_125C (setup sign-off), typ_1p20V_25C, fast_1p32V_m40C
 SG13G2_CORNER ?= slow_1p08V_125C
 # where the IHP SG13G2 open PDK is installed
-IHP_PDK_ROOT  ?= /eda/dk/ihp-sg13g2
+IHP_PDK_ROOT  ?= /oss-tools/pdk/ihp-sg13g2
 # Place and route knobs (implementation/innovus/scripts/globals.tcl)
 # target core utilisation, 0..1
 PNR_UTIL      ?= 0.60
@@ -185,8 +185,17 @@ lint:
 # .lib into a .db under implementation/design_compiler/db/ and caches it.
 .PHONY: synth
 synth:
+	@rm -f $(SYNDIR)/netlist/cordic_accel.v
 	CLK_PERIOD=$(CLK_PERIOD) SG13G2_CORNER=$(SG13G2_CORNER) IHP_PDK_ROOT=$(IHP_PDK_ROOT) \
 	  $(FUSESOC) $(FUSESOC_FLAGS) run --target synth $(CORE)
+# A failed dc_shell does not fail this target on its own: edalize's generated
+# Makefile pipes the tool into `tee', and the exit status of a pipeline is
+# tee's, which is always 0. So check for the thing synthesis is supposed to
+# produce. The whole dc_shell transcript is in the log named below.
+	@test -f $(SYNDIR)/netlist/cordic_accel.v || { \
+	  echo "synthesis produced no netlist -- see $(SYNDIR)/reports/synth.log"; exit 1; }
+	@echo "netlist: $(SYNDIR)/netlist/cordic_accel.v"
+	@echo "reports: $(SYNDIR)/reports/ (synth.log is the full dc_shell transcript)"
 
 .PHONY: synth-clean
 synth-clean:

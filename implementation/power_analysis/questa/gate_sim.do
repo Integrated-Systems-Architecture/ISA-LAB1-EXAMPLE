@@ -42,7 +42,7 @@ if {![info exists PDK]} {
   if {[info exists ::env(IHP_PDK_ROOT)]} {
     set PDK $::env(IHP_PDK_ROOT)
   } else {
-    set PDK /eda/dk/ihp-sg13g2
+    set PDK /oss-tools/pdk/ihp-sg13g2
   }
 }
 
