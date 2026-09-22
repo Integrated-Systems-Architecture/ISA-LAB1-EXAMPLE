@@ -1,0 +1,138 @@
+# ===========================================================================
+#  lab1.view -- the MMMC setup: Multi-Mode Multi-Corner.
+#
+#  Design Compiler optimised at one corner. Innovus does not: it carries
+#  several of them at once and every optimisation step satisfies all of
+#  them simultaneously. That is the whole reason a place-and-route tool
+#  needs a file like this.
+#
+#  Five objects, built in this order, each one made of the previous:
+#
+#    library set      one set of .lib files = one PVT point
+#    operating cond   the voltage and temperature that set was characterised at
+#    timing condition ties a library set to an operating condition
+#    rc corner        how the parasitics of the wires are computed
+#    delay corner     timing condition + rc corner = a complete way to
+#                     compute a delay
+#    constraint mode  an SDC file: one way the design can be driven
+#    analysis view    constraint mode + delay corner = one thing to check
+#
+#  Then you declare which views are checked for setup and which for hold.
+#
+#  This lab uses three corners and one mode, which is the smallest honest
+#  setup:
+#
+#    setup   slow  1.08 V  125 C   the slowest silicon -- can it keep up?
+#    hold    fast  1.32 V  -40 C   the fastest silicon -- does data race
+#                                  past a flop before it is captured?
+#    (typ)   typ   1.20 V   25 C   not signed off on, useful to look at
+#
+#  Why hold needs the FAST corner and not the slow one: a hold violation is
+#  data arriving too EARLY. Fast silicon is what makes it early. Checking
+#  hold at the slow corner finds nothing and proves nothing.
+#
+#  The SoC version of this file (implementation/common/<chip>.view) has
+#  twelve views instead of three, because it also crosses each corner with
+#  an RC corner from the foundry's QRC decks and with several constraint
+#  modes. Same five objects, same order.
+# ===========================================================================
+
+# --- library sets: one per PVT point ------------------------------------
+create_library_set -name libset_slow -timing [list $design(lib_slow)]
+create_library_set -name libset_typ  -timing [list $design(lib_typ)]
+create_library_set -name libset_fast -timing [list $design(lib_fast)]
+
+# If you added an SRAM: append its Liberty for the SAME corner to the SAME
+# library set. A typical memory inside a slow view is the single easiest way
+# to produce a timing report that looks fine and is not.
+#
+#   create_library_set -name libset_slow \
+#       -timing [list $design(lib_slow) $design(lib_sram_slow)]
+
+# --- operating conditions ------------------------------------------------
+# -process 1.0 is the nominal scaling factor; the real process variation is
+# already baked into which .lib file you picked.
+create_opcond -name opcond_slow -process 1.0 \
+  -voltage [lindex $design(opcond_slow) 0] -temperature [lindex $design(opcond_slow) 1]
+create_opcond -name opcond_typ  -process 1.0 \
+  -voltage [lindex $design(opcond_typ)  0] -temperature [lindex $design(opcond_typ)  1]
+create_opcond -name opcond_fast -process 1.0 \
+  -voltage [lindex $design(opcond_fast) 0] -temperature [lindex $design(opcond_fast) 1]
+
+# --- timing conditions ---------------------------------------------------
+create_timing_condition -name tc_slow -library_sets {libset_slow} -opcond opcond_slow
+create_timing_condition -name tc_typ  -library_sets {libset_typ}  -opcond opcond_typ
+create_timing_condition -name tc_fast -library_sets {libset_fast} -opcond opcond_fast
+
+# --- RC corners ----------------------------------------------------------
+# A commercial PDK ships QRC technology decks -- one per interconnect corner
+# (cworst, rcworst, cbest, rcbest, typical) -- and you would write
+#   create_rc_corner -name corner_cworst -qrc_tech $qrc_file(cworst)
+# once per deck, which is what the SoC flow does.
+#
+# IHP SG13G2 ships no QRC deck and no captable. Innovus falls back to its
+# own rule-based extraction from the technology LEF, which is why
+# `set_db design_process_node 130` in init.tcl matters: without it the tool
+# assumes a much more modern node and the parasitics are wrong.
+#
+# So: one RC corner, with the temperature of its PVT point and pessimistic
+# pre-route wire assumptions. Fewer corners than a real sign-off, and the
+# scripts say so rather than pretending otherwise.
+# Note the option spelling. In the legacy Common UI these are -preRoute_res,
+# -postRoute_cap and so on; Stylus renames every one of them to snake_case,
+# and the post_route factors take THREE values (min, typ, max) where the
+# pre_route ones take one. Get it wrong and you get
+#   **ERROR: (IMPTCM-48): "-preRoute_res" is not a legal option for command
+#   "create_rc_corner".
+# `help create_rc_corner` inside the tool prints the current spelling; do
+# that rather than trusting any tutorial, including this one.
+create_rc_corner -name rc_slow -temperature [lindex $design(opcond_slow) 1] \
+  -pre_route_res 1.0 -pre_route_cap 1.0 \
+  -pre_route_clock_res 1.0 -pre_route_clock_cap 1.0 \
+  -post_route_res {1.0 1.0 1.0} -post_route_cap {1.0 1.0 1.0}
+create_rc_corner -name rc_typ  -temperature [lindex $design(opcond_typ)  1] \
+  -pre_route_res 1.0 -pre_route_cap 1.0 \
+  -pre_route_clock_res 1.0 -pre_route_clock_cap 1.0 \
+  -post_route_res {1.0 1.0 1.0} -post_route_cap {1.0 1.0 1.0}
+create_rc_corner -name rc_fast -temperature [lindex $design(opcond_fast) 1] \
+  -pre_route_res 1.0 -pre_route_cap 1.0 \
+  -pre_route_clock_res 1.0 -pre_route_clock_cap 1.0 \
+  -post_route_res {1.0 1.0 1.0} -post_route_cap {1.0 1.0 1.0}
+
+# --- delay corners -------------------------------------------------------
+# -early and -late are the two ends of on-chip variation: within one delay
+# corner the tool may assume some paths are faster than others. Setting both
+# to the same condition, as here, means no OCV derating from the library --
+# route.tcl turns OCV on separately with set_db timing_analysis_type ocv.
+create_delay_corner -name dc_slow \
+  -early_timing_condition tc_slow -late_timing_condition tc_slow \
+  -early_rc_corner rc_slow -late_rc_corner rc_slow
+create_delay_corner -name dc_typ \
+  -early_timing_condition tc_typ  -late_timing_condition tc_typ \
+  -early_rc_corner rc_typ  -late_rc_corner rc_typ
+create_delay_corner -name dc_fast \
+  -early_timing_condition tc_fast -late_timing_condition tc_fast \
+  -early_rc_corner rc_fast -late_rc_corner rc_fast
+
+# --- constraint mode -----------------------------------------------------
+# One mode: the accelerator has one clock and one way of being driven. A
+# chip with a scan mode, a low-power mode and a functional mode would have
+# three SDC files and three constraint modes here, and every corner below
+# would be crossed with all three.
+#
+# The SDC is the one Design Compiler wrote. Carrying the synthesis
+# constraints forward unchanged is the point -- if place and route is
+# allowed to relax them, the netlist meets a constraint nobody asked for.
+create_constraint_mode -name func_mode -sdc_files [list $design(default_sdc)]
+
+# --- analysis views ------------------------------------------------------
+create_analysis_view -name setup_slow -constraint_mode func_mode -delay_corner dc_slow
+create_analysis_view -name hold_fast  -constraint_mode func_mode -delay_corner dc_fast
+create_analysis_view -name view_typ   -constraint_mode func_mode -delay_corner dc_typ
+
+# Which views are active, and for what. Everything from here on -- every
+# opt_design, every ccopt_design, every report -- is evaluated against
+# exactly these.
+set setup_views {setup_slow}
+set hold_views  {hold_fast}
+set_analysis_view -setup $setup_views -hold $hold_views

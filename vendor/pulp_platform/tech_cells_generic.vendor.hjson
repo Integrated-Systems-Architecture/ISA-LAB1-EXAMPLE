@@ -1,0 +1,20 @@
+// Vendoring descriptor: pulp-platform tech_cells_generic.
+// Behavioural models of the cells a real technology library provides (clock
+// gates, SRAM macros, power cells). The accelerator instantiates the clock
+// gate through this wrapper so the same RTL maps onto a real library later.
+{
+  name: "tech_cells_generic",
+  target_dir: "tech_cells_generic",
+
+  upstream: {
+    url: "https://github.com/pulp-platform/tech_cells_generic.git",
+    rev: "fca524a1174f6363ba0e778f37b9f398257d4b8f",
+  },
+
+  exclude_from_upstream: [
+    "scripts",
+    "ips_list.yml",
+    "Bender.yml",
+    ".github",
+  ]
+}

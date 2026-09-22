@@ -1,0 +1,108 @@
+// Register description for the CORDIC accelerator, in the HJSON format
+// OpenTitan's reggen (regtool) reads and every X-HEEP peripheral uses.
+//
+// `make regs` feeds this file to the regtool that ships inside the vendored
+// register_interface IP and produces:
+//   rtl/cordic_accel_reg_pkg.sv   reg2hw / hw2reg struct definitions
+//   rtl/cordic_accel_reg_top.sv   the reg_req/reg_rsp -> registers block
+//   sw/cordic_accel_regs.h        C #defines for the driver (Lab 3)
+//
+// Offsets are assigned in declaration order, word aligned:
+//   0x00 CTRL   0x04 STATUS   0x08 N      0x0C SRC
+//   0x10 DST    0x14 SEED_X   0x18 SEED_Y
+//
+// The registers are control/status/configuration ONLY. The angles and the
+// results never pass through here: they move over the OBI data port, which is
+// the whole point of splitting the two interfaces.
+
+{ name: "cordic_accel"
+  clock_primary: "clk_i"
+  reset_primary: "rst_ni"
+  bus_interfaces: [
+    { protocol: "reg_iface", direction: "device" }
+  ]
+  regwidth: 32
+  registers: [
+
+    { name:     "CTRL"
+      desc:     "Control register. Write START=1 to launch a run."
+      swaccess: "wo"
+      hwaccess: "hro"
+      hwqe:     "true"   // exposes reg2hw.ctrl.qe: a one-cycle write pulse
+      fields: [
+        { bits: "0", name: "START"
+          desc: "Write 1 to start processing N angles. Ignored while BUSY."
+        }
+      ]
+    }
+
+    { name:     "STATUS"
+      desc:     "Status register, driven by hardware."
+      swaccess: "ro"
+      hwaccess: "hwo"
+      // hwext: the register has no storage of its own -- reads come straight
+      // from the hardware in the same cycle. Without it reggen puts a flop in
+      // the read path, and software that writes START and immediately reads
+      // STATUS gets the value from before the write: it sees the previous
+      // run's DONE and concludes the new one has already finished.
+      hwext:    "true"
+      fields: [
+        { bits: "0", name: "DONE"
+          desc: "Set when the last result has been written to memory. Cleared on the next START."
+        }
+        { bits: "1", name: "BUSY"
+          desc: "Set while the accelerator owns the OBI port."
+        }
+      ]
+    }
+
+    { name:     "N"
+      desc:     "Number of angles to process."
+      swaccess: "rw"
+      hwaccess: "hro"
+      resval:   "1"
+      fields: [
+        { bits: "15:0", name: "N", desc: "Element count." }
+      ]
+    }
+
+    { name:     "SRC"
+      desc:     "Byte address of the angle array. One angle per 32-bit word, Q2.13 in the low 16 bits."
+      swaccess: "rw"
+      hwaccess: "hro"
+      fields: [
+        { bits: "31:0", name: "SRC", desc: "Source base address (word aligned)." }
+      ]
+    }
+
+    { name:     "DST"
+      desc:     "Byte address of the result array. One result per 32-bit word, {y[15:0], x[15:0]}, both Q1.14."
+      swaccess: "rw"
+      hwaccess: "hro"
+      fields: [
+        { bits: "31:0", name: "DST", desc: "Destination base address (word aligned)." }
+      ]
+    }
+
+    { name:     "SEED_X"
+      desc:     "Initial x of the vector to rotate, Q1.14. The reset value is round(2^14 / K) = 9949, the seed that cancels the CORDIC processing gain so the results are cos/sin."
+      swaccess: "rw"
+      hwaccess: "hro"
+      resval:   "9949"
+      fields: [
+        { bits: "15:0", name: "SEED_X", desc: "x0, Q1.14 signed." }
+      ]
+    }
+
+    { name:     "SEED_Y"
+      desc:     "Initial y of the vector to rotate, Q1.14."
+      swaccess: "rw"
+      hwaccess: "hro"
+      resval:   "0"
+      fields: [
+        { bits: "15:0", name: "SEED_Y", desc: "y0, Q1.14 signed." }
+      ]
+    }
+
+  ]
+}

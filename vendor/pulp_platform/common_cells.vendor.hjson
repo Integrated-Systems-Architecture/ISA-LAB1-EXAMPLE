@@ -1,0 +1,20 @@
+// Vendoring descriptor: pulp-platform common_cells.
+// Fetched by `make vendor` (python3 util/vendor.py <this file>), which copies a
+// snapshot of the upstream repo into ./common_cells -- no submodule, no .git.
+// Pin `rev` to a tag or SHA so every group builds the same RTL.
+{
+  name: "common_cells",
+  target_dir: "common_cells",
+
+  upstream: {
+    url: "https://github.com/pulp-platform/common_cells.git",
+    rev: "v1.38.0",
+  },
+
+  exclude_from_upstream: [
+    "test",
+    "ci",
+    "formal",
+    ".github",
+  ]
+}

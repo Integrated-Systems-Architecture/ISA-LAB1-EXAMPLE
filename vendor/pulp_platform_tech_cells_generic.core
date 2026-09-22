@@ -1,0 +1,20 @@
+CAPI=2:
+# FuseSoC wrapper for the vendored pulp-platform tech_cells_generic IP.
+#
+# Behavioural stand-ins for cells that a real technology library provides:
+# tc_clk_gating (the integrated clock gate the accelerator uses to stop the
+# CORDIC datapath when idle), tc_sram, tc_pwr. Synthesis maps them onto the
+# library's own cells, simulation uses these models.
+
+name: pulp-platform.org::tech_cells_generic:0.2.13
+
+filesets:
+  rtl:
+    files:
+      - pulp_platform/tech_cells_generic/src/rtl/tc_clk.sv
+      - pulp_platform/tech_cells_generic/src/rtl/tc_sram.sv
+    file_type: systemVerilogSource
+
+targets:
+  default:
+    filesets: [rtl]

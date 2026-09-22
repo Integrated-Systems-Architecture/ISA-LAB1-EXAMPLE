@@ -1,0 +1,386 @@
+// ===========================================================================
+//  cordic_accel.sv -- the CORDIC rotator as a memory-mapped accelerator.
+//
+//  Two interfaces, one job each:
+//
+//    reg_req_i / reg_rsp_o   configuration. A reggen-generated CSR block
+//                            (cordic_accel_reg_top, from data/cordic_accel.hjson)
+//                            over the pulp register_interface protocol. Only
+//                            control, status and pointers travel here.
+//
+//    obi_req_o / obi_rsp_i   data. An OBI *manager* port: once started, the
+//                            accelerator fetches the angles itself, rotates
+//                            them and writes the results back. The CPU is not
+//                            in the loop, which is where the speedup comes
+//                            from.
+//
+//  Software's view:
+//
+//      write SRC, DST, N, (SEED_X, SEED_Y)   -- via the register interface
+//      write CTRL.START = 1
+//      poll STATUS.DONE                       -- or wait for it
+//      read the results from DST              -- written by the accelerator
+//
+//  Memory format: one angle per 32-bit word (Q2.13 in the low 16 bits, sign
+//  extended), one result per 32-bit word, {y[15:0], x[15:0]}, both Q1.14.
+//  Word per element rather than packed pairs keeps the address arithmetic to
+//  a shift and makes the C driver a plain int32 array.
+//
+//  Structure:
+//
+//     CSRs ─► FSM ─┬─► read  requests ─┐
+//                  │                   ├─► OBI manager port ─► memory
+//                  └─► write requests ─┘
+//                          ▲
+//     fifo_v3 (angles) ─► cordic_rot ─► result register
+//
+//  The FIFO is what makes the fetch and the compute overlap: the rotator
+//  needs N+2 cycles per angle, so the read of angle i+1 is issued while angle
+//  i is still turning. Reads are issued on credit (credit_counter) so a
+//  response can never arrive with nowhere to go -- OBI has no back pressure
+//  on the R channel in this configuration.
+//
+//  IPs used, and why:
+//    register_interface  the CSR protocol the generated reg_top speaks
+//    common_cells        fifo_v3 (angle buffer), credit_counter (outstanding
+//                        reads), cf_math_pkg (counter widths)
+//    tech_cells_generic  tc_clk_gating -- the rotator's clock is stopped while
+//                        the accelerator is idle. It is 20 flops of datapath
+//                        that would otherwise toggle on every edge forever.
+// ===========================================================================
+
+module cordic_accel
+  import cordic_pkg::*;
+  import cordic_accel_reg_pkg::*;
+#(
+  /// OBI address width of the data port.
+  parameter int unsigned       AddrWidth  = cordic_accel_types_pkg::AddrWidth,
+  /// OBI data width of the data port.
+  parameter int unsigned       DataWidth  = cordic_accel_types_pkg::DataWidth,
+  /// OBI transaction id width of the data port.
+  parameter int unsigned       IdWidth    = cordic_accel_types_pkg::IdWidth,
+  /// OBI request struct type.
+  parameter type               obi_req_t  = cordic_accel_types_pkg::cordic_obi_req_t,
+  /// OBI response struct type.
+  parameter type               obi_rsp_t  = cordic_accel_types_pkg::cordic_obi_rsp_t,
+  /// Register interface request struct type.
+  parameter type               reg_req_t  = cordic_accel_types_pkg::cordic_reg_req_t,
+  /// Register interface response struct type.
+  parameter type               reg_rsp_t  = cordic_accel_types_pkg::cordic_reg_rsp_t,
+  /// Depth of the angle prefetch FIFO. Must cover the memory read latency;
+  /// deeper than that buys nothing, the rotator is the bottleneck.
+  parameter int unsigned       FifoDepth  = 4,
+  /// Number of CORDIC micro-rotations (accuracy vs latency).
+  parameter int unsigned       Iterations = cordic_pkg::N
+) (
+  input  logic     clk_i,
+  input  logic     rst_ni,
+  /// Bypass the internal clock gate (scan / DFT).
+  input  logic     testmode_i,
+
+  // Configuration: register interface, subordinate.
+  input  reg_req_t reg_req_i,
+  output reg_rsp_t reg_rsp_o,
+
+  // Data: OBI, manager.
+  output obi_req_t obi_req_o,
+  input  obi_rsp_t obi_rsp_i
+);
+
+  // --------------------------------------------------------------------
+  // Local types and constants
+  // --------------------------------------------------------------------
+  localparam int unsigned AddrW  = AddrWidth;
+  localparam int unsigned DataW  = DataWidth;
+  localparam int unsigned CntW   = 17;                 // N is 16 bits, +1 to hold N itself
+  localparam int unsigned IdW    = IdWidth;
+
+  // Transaction ids: the R channel carries the id back, which is how the
+  // response handler tells a returning angle from a completed write.
+  localparam logic [IdW-1:0] IdRead  = '0;
+  localparam logic [IdW-1:0] IdWrite = 1;
+
+  typedef logic [AddrW-1:0] addr_t;
+  typedef logic [CntW-1:0]  cnt_t;
+
+  // --------------------------------------------------------------------
+  // CSR block (generated by reggen from data/cordic_accel.hjson)
+  // --------------------------------------------------------------------
+  cordic_accel_reg2hw_t reg2hw;
+  cordic_accel_hw2reg_t hw2reg;
+
+  cordic_accel_reg_top #(
+    .reg_req_t ( reg_req_t ),
+    .reg_rsp_t ( reg_rsp_t ),
+    .AW        ( 5         )
+  ) i_regs (
+    .clk_i,
+    .rst_ni,
+    .reg_req_i,
+    .reg_rsp_o,
+    .reg2hw,
+    .hw2reg,
+    .devmode_i ( 1'b1 )     // report an error on an unmapped access
+  );
+
+  // A write of CTRL.START=1 is a one-cycle pulse (hwqe in the hjson).
+  logic start;
+  assign start = reg2hw.ctrl.qe & reg2hw.ctrl.q;
+
+  // --------------------------------------------------------------------
+  // Run state
+  // --------------------------------------------------------------------
+  logic  busy_q, done_q;
+  cnt_t  n_q;                  // element count, latched at start
+  addr_t src_q, dst_q;         // base addresses, latched at start
+  data_t seed_x_q, seed_y_q;   // rotated vector, latched at start
+
+  cnt_t  rd_issued_q;          // angles requested from memory
+  cnt_t  wr_issued_q;          // results handed to the bus
+  cnt_t  wr_done_q;            // results acknowledged by memory
+
+  logic run_start;
+  assign run_start = start & ~busy_q;   // START while BUSY is ignored
+
+  // --------------------------------------------------------------------
+  // Angle FIFO (common_cells): decouples memory reads from the rotator.
+  // --------------------------------------------------------------------
+  logic                fifo_full, fifo_empty, fifo_push, fifo_pop;
+  logic [DataW-1:0]    fifo_din, fifo_dout;
+
+  fifo_v3 #(
+    .FALL_THROUGH ( 1'b0      ),
+    .DATA_WIDTH   ( DataW     ),
+    .DEPTH        ( FifoDepth )
+  ) i_angle_fifo (
+    .clk_i,
+    .rst_ni,
+    .flush_i    ( run_start  ),   // a new run starts from an empty pipe
+    .testmode_i ( testmode_i ),
+    .full_o     ( fifo_full  ),
+    .empty_o    ( fifo_empty ),
+    .usage_o    ( /* unused */ ),
+    .data_i     ( fifo_din   ),
+    .push_i     ( fifo_push  ),
+    .data_o     ( fifo_dout  ),
+    .pop_i      ( fifo_pop   )
+  );
+
+  // --------------------------------------------------------------------
+  // Read credits (common_cells): one credit = one free FIFO slot that no
+  // in-flight read has claimed yet. Without this the accelerator could issue
+  // more reads than the FIFO can absorb, and OBI (with UseRReady = 0) gives
+  // the manager no way to stall a response.
+  // --------------------------------------------------------------------
+  logic credit_left, rd_credit_take, rd_credit_give;
+
+  credit_counter #(
+    .NumCredits      ( FifoDepth ),
+    .InitCreditEmpty ( 1'b0      )
+  ) i_rd_credits (
+    .clk_i,
+    .rst_ni,
+    .credit_o      ( /* unused */   ),
+    .credit_give_i ( rd_credit_give ),
+    .credit_take_i ( rd_credit_take ),
+    .credit_init_i ( run_start      ),
+    .credit_left_o ( credit_left    ),
+    .credit_crit_o ( /* unused */   ),
+    .credit_full_o ( /* unused */   )
+  );
+
+  // --------------------------------------------------------------------
+  // The rotator itself -- the cookbook core, unmodified, on a gated clock.
+  // --------------------------------------------------------------------
+  logic   clk_cordic;
+  logic   cordic_en;
+  logic   cordic_req_valid, cordic_req_ready;
+  logic   cordic_rsp_valid, cordic_rsp_ready;
+  angle_t cordic_theta;
+  data_t  cordic_x, cordic_y;
+
+  // Run the datapath only while there is work in flight. `busy_q` covers the
+  // whole run (the rotator may still be finishing the last angle), so this is
+  // a coarse gate: correct by construction, no clock domain crossing.
+  assign cordic_en = busy_q | run_start;
+
+  tc_clk_gating #(
+    .IS_FUNCTIONAL ( 1'b0 )      // power saving only; removing it must not change behaviour
+  ) i_cordic_clk_gate (
+    .clk_i     ( clk_i      ),
+    .en_i      ( cordic_en  ),
+    .test_en_i ( testmode_i ),
+    .clk_o     ( clk_cordic )
+  );
+
+  cordic_rot #(
+    .ITER ( Iterations )
+  ) i_cordic (
+    .clk_i       ( clk_cordic       ),
+    .rst_ni      ( rst_ni           ),
+    .req_valid_i ( cordic_req_valid ),
+    .req_ready_o ( cordic_req_ready ),
+    .req_x_i     ( seed_x_q         ),
+    .req_y_i     ( seed_y_q         ),
+    .req_theta_i ( cordic_theta     ),
+    .rsp_valid_o ( cordic_rsp_valid ),
+    .rsp_ready_i ( cordic_rsp_ready ),
+    .rsp_x_o     ( cordic_x         ),
+    .rsp_y_o     ( cordic_y         )
+  );
+
+  // Low 16 bits of the fetched word are the angle, Q2.13.
+  assign cordic_theta = angle_t'(fifo_dout[AW-1:0]);
+
+  // Feed the rotator whenever it is free and an angle is waiting.
+  assign cordic_req_valid = ~fifo_empty & busy_q;
+  assign fifo_pop         = cordic_req_valid & cordic_req_ready;
+
+  // --------------------------------------------------------------------
+  // Result register: holds one finished rotation until the bus takes it.
+  // --------------------------------------------------------------------
+  logic             res_valid_q;
+  logic [DataW-1:0] res_data_q;
+
+  assign cordic_rsp_ready = ~res_valid_q;
+
+  // --------------------------------------------------------------------
+  // OBI manager: writes have priority over reads, so a finished result never
+  // waits behind a prefetch and the result register frees up immediately.
+  // --------------------------------------------------------------------
+  logic do_write, do_read, obi_req, obi_gnt;
+
+  assign do_write = res_valid_q;
+  assign do_read  = busy_q & (rd_issued_q < n_q) & credit_left & ~fifo_full;
+  assign obi_req  = do_write | do_read;
+  assign obi_gnt  = obi_req & obi_rsp_i.gnt;
+
+  addr_t rd_addr, wr_addr;
+  assign rd_addr = src_q + (addr_t'(rd_issued_q) << 2);
+  assign wr_addr = dst_q + (addr_t'(wr_issued_q) << 2);
+
+  always_comb begin
+    obi_req_o          = '0;
+    obi_req_o.req      = obi_req;
+    obi_req_o.a.addr   = do_write ? wr_addr : rd_addr;
+    obi_req_o.a.we     = do_write;
+    obi_req_o.a.be     = '1;
+    obi_req_o.a.wdata  = res_data_q;
+    obi_req_o.a.aid    = do_write ? IdWrite : IdRead;
+  end
+
+  // Response handling. The id says which channel it belongs to.
+  logic rsp_is_read, rsp_is_write;
+  assign rsp_is_read  = obi_rsp_i.rvalid & (obi_rsp_i.r.rid == IdRead);
+  assign rsp_is_write = obi_rsp_i.rvalid & (obi_rsp_i.r.rid == IdWrite);
+
+  assign fifo_push      = rsp_is_read;
+  assign fifo_din       = obi_rsp_i.r.rdata;
+  // A credit is a FIFO slot nobody has claimed. It is spent when a read is
+  // issued and returned when the rotator pops the angle out again -- NOT when
+  // the response arrives, which is the mistake that lets a fifth read into a
+  // four-deep FIFO.
+  assign rd_credit_take = obi_gnt & ~do_write;
+  assign rd_credit_give = fifo_pop;
+
+  // --------------------------------------------------------------------
+  // Sequential state
+  // --------------------------------------------------------------------
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      busy_q      <= 1'b0;
+      done_q      <= 1'b0;
+      n_q         <= '0;
+      src_q       <= '0;
+      dst_q       <= '0;
+      seed_x_q    <= '0;
+      seed_y_q    <= '0;
+      rd_issued_q <= '0;
+      wr_issued_q <= '0;
+      wr_done_q   <= '0;
+      res_valid_q <= 1'b0;
+      res_data_q  <= '0;
+    end else begin
+      if (run_start) begin
+        // Latch the configuration for the whole run: software may not change
+        // it under the accelerator's feet.
+        // A zero-length run never sees a write response, so retire it at once.
+        busy_q      <= (reg2hw.n.q != '0);
+        done_q      <= (reg2hw.n.q == '0);
+        n_q         <= cnt_t'(reg2hw.n.q);
+        src_q       <= addr_t'(reg2hw.src.q);
+        dst_q       <= addr_t'(reg2hw.dst.q);
+        seed_x_q    <= data_t'(reg2hw.seed_x.q);
+        seed_y_q    <= data_t'(reg2hw.seed_y.q);
+        rd_issued_q <= '0;
+        wr_issued_q <= '0;
+        wr_done_q   <= '0;
+        res_valid_q <= 1'b0;
+      end else begin
+        // Result register: fill from the rotator, empty into the bus.
+        if (cordic_rsp_valid && cordic_rsp_ready) begin
+          res_valid_q <= 1'b1;
+          res_data_q  <= {cordic_y, cordic_x};
+        end
+        if (obi_gnt && do_write) begin
+          res_valid_q <= 1'b0;
+          wr_issued_q <= wr_issued_q + 1;
+        end
+        if (obi_gnt && !do_write) begin
+          rd_issued_q <= rd_issued_q + 1;
+        end
+        if (rsp_is_write) begin
+          wr_done_q <= wr_done_q + 1;
+          // The run ends when the last write has been acknowledged, not when
+          // the last rotation finished: the data has to be in memory before
+          // software is told it can read it.
+          if (wr_done_q + 1 == n_q) begin
+            busy_q <= 1'b0;
+            done_q <= 1'b1;
+          end
+        end
+      end
+    end
+  end
+
+  // --------------------------------------------------------------------
+  // Status back to software
+  // --------------------------------------------------------------------
+  // `run_start` is folded in so that STATUS is right in the very cycle the
+  // START write lands: reggen registers the write pulse (prim_subreg drives
+  // qe one cycle after `we`), and the next bus access can arrive on the very
+  // next cycle. Without this, software that writes START and immediately
+  // reads STATUS sees the *previous* run's DONE still set and concludes it is
+  // finished before it began -- a race a polling driver hits every time.
+  // STATUS is `hwext` in the hjson: no storage in the CSR block, the read
+  // returns these wires in the same cycle. `run_start` is folded in because
+  // reggen registers the write pulse (prim_subreg drives qe one cycle after
+  // `we`), so the START write and the state change it causes land a cycle
+  // apart -- and a driver that writes START and immediately polls STATUS
+  // would otherwise read the previous run's DONE and stop before it began.
+  assign hw2reg.status.done.d = done_q & ~run_start;
+  assign hw2reg.status.busy.d = busy_q | run_start;
+
+  // --------------------------------------------------------------------
+  // Design-level checks: they travel with the module, not with a testbench.
+  // --------------------------------------------------------------------
+`ifndef SYNTHESIS
+  // The R channel cannot be back-pressured in this configuration, so a
+  // response must never arrive when the FIFO cannot take it.
+  always_ff @(posedge clk_i) begin
+    if (rst_ni && rsp_is_read) begin
+      assert (!fifo_full)
+        else $error("cordic_accel: read response with a full angle FIFO");
+    end
+  end
+
+  // Every write must be one the accelerator issued.
+  always_ff @(posedge clk_i) begin
+    if (rst_ni && rsp_is_write) begin
+      assert (wr_done_q < wr_issued_q)
+        else $error("cordic_accel: unexpected write response");
+    end
+  end
+`endif
+
+endmodule : cordic_accel

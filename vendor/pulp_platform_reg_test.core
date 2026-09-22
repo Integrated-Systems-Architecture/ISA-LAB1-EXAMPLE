@@ -1,0 +1,18 @@
+CAPI=2:
+# Verification component that ships with the vendored register_interface IP:
+# reg_test::reg_driver, a class that drives REG_BUS reads and writes.
+# Separate core so it never reaches a synthesis build.
+
+name: pulp-platform.org::reg_test:0.4.5
+
+filesets:
+  tb:
+    files:
+      - pulp_platform/register_interface/src/reg_test.sv
+    file_type: systemVerilogSource
+    depend:
+      - pulp-platform.org::register_interface
+
+targets:
+  default:
+    filesets: [tb]

@@ -1,0 +1,29 @@
+CAPI=2:
+# FuseSoC wrapper for the vendored pulp-platform OBI IP.
+#
+# The upstream repo is built with Bender, not FuseSoC, so this file is the
+# translation: it lists the sources in dependency order and names the VLNV
+# (pulp-platform.org::obi) that cordic_accel.core depends on. `make vendor`
+# fetches the sources; this file tells FuseSoC how to compile them.
+#
+# Two filesets on purpose:
+#   rtl   synthesisable protocol + interconnect  (used by the design)
+#   tb    verification components                (used only by the testbench)
+
+name: pulp-platform.org::obi:0.1.7
+
+filesets:
+  rtl:
+    files:
+      - pulp_platform/obi/include/obi/assign.svh  : {is_include_file: true, include_path: pulp_platform/obi/include}
+      - pulp_platform/obi/include/obi/typedef.svh : {is_include_file: true, include_path: pulp_platform/obi/include}
+      - pulp_platform/obi/src/obi_pkg.sv
+      - pulp_platform/obi/src/obi_intf.sv
+      - pulp_platform/obi/src/obi_mux.sv
+    file_type: systemVerilogSource
+    depend:
+      - pulp-platform.org::common_cells
+
+targets:
+  default:
+    filesets: [rtl]

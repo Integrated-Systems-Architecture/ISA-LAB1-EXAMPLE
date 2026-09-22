@@ -1,0 +1,24 @@
+CAPI=2:
+# Verification components that ship with the vendored OBI IP.
+#
+# A separate core, not a fileset of pulp-platform.org::obi, because FuseSoC
+# dependencies name a core, never one of its filesets: this is how you keep
+# simulation-only sources out of a synthesis build.
+#
+#   obi_test    class-based driver, obi_rand_manager, obi_rand_subordinate
+#   obi_sim_mem behavioural OBI memory
+
+name: pulp-platform.org::obi_test:0.1.7
+
+filesets:
+  tb:
+    files:
+      - pulp_platform/obi/src/test/obi_test.sv
+      - pulp_platform/obi/src/test/obi_sim_mem.sv
+    file_type: systemVerilogSource
+    depend:
+      - pulp-platform.org::obi
+
+targets:
+  default:
+    filesets: [tb]

@@ -1,0 +1,21 @@
+// Vendoring descriptor: pulp-platform register_interface.
+// Supplies the reg_req/reg_rsp protocol used for the accelerator's CSRs, the
+// REG_BUS interface and the reg_test::reg_driver verification component, and
+// -- under vendor/lowrisc_opentitan/util/regtool.py -- the reggen tool that
+// turns data/cordic_accel.hjson into the CSR block (`make regs`).
+{
+  name: "register_interface",
+  target_dir: "register_interface",
+
+  upstream: {
+    url: "https://github.com/pulp-platform/register_interface.git",
+    rev: "8e8c209ea559d3b54f45cf30fcce95ce70ff5e49",
+  },
+
+  exclude_from_upstream: [
+    ".github",
+    "lint",
+    "docs",
+    "vendor/lowrisc_opentitan.vendor.hjson",
+  ]
+}

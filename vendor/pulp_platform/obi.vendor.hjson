@@ -1,0 +1,18 @@
+// Vendoring descriptor: pulp-platform obi.
+// The OBI protocol package, the OBI_BUS/OBI_BUS_DV interfaces, the
+// interconnect components (obi_mux) and the verification components the
+// testbench drives the bus with (obi_test::obi_rand_manager, obi_sim_mem).
+{
+  name: "obi",
+  target_dir: "obi",
+
+  upstream: {
+    url: "https://github.com/pulp-platform/obi.git",
+    rev: "v0.1.7",
+  },
+
+  exclude_from_upstream: [
+    ".github",
+    ".gitlab-ci.yml",
+  ]
+}

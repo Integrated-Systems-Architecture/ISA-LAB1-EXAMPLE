@@ -1,0 +1,27 @@
+CAPI=2:
+# FuseSoC wrapper for the vendored pulp-platform register_interface IP.
+#
+# reg_req_t / reg_rsp_t is the protocol the reggen-generated CSR block speaks,
+# so every X-HEEP peripheral (and this accelerator) has one of these ports.
+# The `tb` fileset adds reg_test::reg_driver, the verification component the
+# testbench uses to write and read those CSRs.
+
+name: pulp-platform.org::register_interface:0.4.5
+
+filesets:
+  rtl:
+    files:
+      - pulp_platform/register_interface/include/register_interface/assign.svh  : {is_include_file: true, include_path: pulp_platform/register_interface/include}
+      - pulp_platform/register_interface/include/register_interface/typedef.svh : {is_include_file: true, include_path: pulp_platform/register_interface/include}
+      - pulp_platform/register_interface/src/reg_intf.sv
+      - pulp_platform/register_interface/src/reg_uniform.sv
+      # OpenTitan register primitives, vendored inside register_interface.
+      # reggen instantiates these in every generated reg_top.
+      - pulp_platform/register_interface/vendor/lowrisc_opentitan/src/prim_subreg_arb.sv
+      - pulp_platform/register_interface/vendor/lowrisc_opentitan/src/prim_subreg.sv
+      - pulp_platform/register_interface/vendor/lowrisc_opentitan/src/prim_subreg_ext.sv
+    file_type: systemVerilogSource
+
+targets:
+  default:
+    filesets: [rtl]
