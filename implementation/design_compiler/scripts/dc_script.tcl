@@ -188,7 +188,7 @@ report_clocks > ${REPORT_DIR}/clocks.rpt
 # ========================================================================
 #  Synthesis
 # ========================================================================
-# compile_ultra is the high-effort flow; the course notes use plain `compile`.
+# compile_ultra is the high-effort flow; plain `compile` is the basic one.
 # Run both at the same constraint and compare -- that difference is what
 # effort buys, and it is worth knowing before you trust either number.
 # compile -gate_clock

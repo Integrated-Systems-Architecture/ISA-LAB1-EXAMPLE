@@ -54,8 +54,7 @@ That is all the preparation there is. Everything else — the libraries, the
 search path, the `WORK` binding — you will type in §1, and it lives in
 `scripts/dc_script.tcl` once you move to the scripted flow.
 
-> **A note on `.synopsys_dc.setup`.** Most Design Compiler tutorials, the
-> course notes included, start by writing a hidden file called
+> **A note on `.synopsys_dc.setup`.** Most Design Compiler tutorials start by writing a hidden file called
 > `.synopsys_dc.setup` holding the library setup. Design Compiler reads it
 > automatically — but **only from the directory `dc_shell` was started in**.
 > Run the tool from somewhere else, as FuseSoC does from its build directory,
@@ -606,7 +605,7 @@ The libraries live at the top of `dc_script.tcl` rather than in a separate
 file, for the reason given in §0: this way the same setup applies whether you
 run the script by hand or through FuseSoC.
 
-Run them standalone exactly as the course notes describe — the script is a
+Run them standalone — the script is a
 text file of shell commands, and `dc_shell` takes it with `-f`:
 
 ```bash

@@ -27,8 +27,25 @@ nothing.
 
 ### 1. Log in
 
+The server is `led-x3850-2.polito.it`, SSH port `10038`. Accounts go from
+`isa01_2026_2027` to `isa42_2026_2027`: use the one assigned to your group.
+The default password is given in class; change it with `passwd` the first time
+you log in.
+
+Put this in your `~/.ssh/config` (replace `NN` with your account number):
+
+```
+Host isa
+  HostName led-x3850-2.polito.it
+  Port 10038
+  User isaNN_2026_2027
+  ForwardX11 yes
+```
+
+Then:
+
 ```bash
-ssh <your-user>@isaserver          # add -X for the Innovus and DC GUIs
+ssh isa          # ForwardX11 above is what the Innovus and DC GUIs need
 ```
 
 X11 forwarding is not optional for Lab 1 the way it was for Lab 0: you are
@@ -37,12 +54,31 @@ time, and `design_vision` and `innovus` are graphical tools. Test it before
 you need it:
 
 ```bash
-ssh -X <your-user>@isaserver
+ssh -X isa
 xclock          # a clock should appear on your screen
 ```
 
 On macOS you need [XQuartz](https://www.xquartz.org) installed and running
 first. On Windows, WSL2 with WSLg handles X11 by itself.
+
+#### Optional: a full remote desktop with X2Go
+
+If you prefer a desktop to single forwarded windows, the server runs X2Go.
+It is also much faster than `ssh -X` over a slow link, and the session
+survives a dropped connection: reconnect and your windows are still there.
+
+1. Install the [X2Go client](https://wiki.x2go.org/doku.php/download:start).
+   It needs no XQuartz on macOS.
+2. Create a new session:
+   - **Host:** `led-x3850-2.polito.it`
+   - **Login:** `isaNN_2026_2027`, your account
+   - **SSH port:** `10038`
+   - **Session type:** `MATE`
+3. Connect and enter your password. Open a terminal from the MATE menu and
+   continue from step 2 below.
+
+When you are done, log out from the MATE menu. Closing the window only
+suspends the session, and it keeps running on the server.
 
 ### 2. Activate the open-source environment
 

@@ -374,15 +374,6 @@ Third, the **technology's own documentation** — the standard cell list, with
 each cell's function, drive strengths and pin names, in
 `$IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/doc/`.
 
-The course's older synthesis and place-and-route notes are in
-`ISA_design_flow_documents/` at the top of this repository. They target
-Nangate 45 and the legacy Innovus command set; the READMEs here target SG13G2
-and Stylus, and each step names the legacy command alongside so you can read
-both.
-
-The PDK ships its own documentation in
-`$IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/doc/`.
-
 ## Layout
 
 ```

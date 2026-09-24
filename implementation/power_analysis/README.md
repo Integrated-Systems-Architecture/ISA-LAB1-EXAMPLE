@@ -146,7 +146,7 @@ it is:
 vlog -work work $IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 ```
 
-The course notes compile these once into a resource library and link it with
+You can also compile these once into a resource library and link it with
 `vsim -L`. Either works; compiling them into `work` each time costs a few
 seconds on a library this size and removes a version-skew failure mode.
 
@@ -216,9 +216,8 @@ is not your power.
 `$finish` when it is done, so `run -all` ends with the last checked result.
 If instead you `run 2 us` and the design finishes at 1 µs, the last
 microsecond is idle time recorded as part of the measurement, and the
-average power comes out low. The course notes solve this with an
-`END_SIM_i` signal that stops the clock; this testbench solves it by
-finishing.
+average power comes out low. One fix is an `END_SIM_i` signal that stops
+the clock; this testbench solves it by finishing.
 
 ---
 

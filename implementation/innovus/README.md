@@ -74,15 +74,14 @@ Innovus understands two complete sets of commands for the same operations:
 | a setting | `setDesignMode -process 130` | `set_db design_process_node 130` |
 | save | `saveDesign` | `write_db` |
 
-The course notes in `ISA_design_flow_documents/innovus.tex` use the legacy
-names, because they predate Stylus. The scripts in `scripts/` use Stylus,
-because that is what current flows are written in — including the polHEEPo
+Older tutorials use the legacy names, because they predate Stylus. The
+scripts in `scripts/` use Stylus, because that is what current flows are written in — including the polHEEPo
 and HEEPatia SoC flows you will meet if you continue in this group.
 
 The **menus are the same either way**. When this page says
 *Floorplan → Specify Floorplan*, it means the same click in both. Each step
 script carries a header naming both the menu item and the legacy command, so
-you can follow the old notes and the new scripts side by side.
+you can follow older material and the new scripts side by side.
 
 Two things follow from `set_db` being the Stylus way to set anything:
 
@@ -208,8 +207,8 @@ make_dirs
 set REPORT_DIR $design(REPORT_DIR)
 ```
 
-`scripts/globals.tcl` is the equivalent of the `design.globals` file in the
-course notes, in the form the SoC flows use: one `$design(...)` array
+`scripts/globals.tcl` is the equivalent of a legacy `design.globals` file,
+in the form the SoC flows use: one `$design(...)` array
 holding every path, every cell name and every number, and nothing else in
 the flow sets any of them. Open it now — it is the file you will edit most.
 
@@ -233,8 +232,8 @@ every standard cell arrives with unconnected VDD and VSS.
 
 **`design_process_node 130`.** Innovus defaults to a much smaller node, and
 the default decides how it estimates wire R and C *before there are any
-wires*. Every pre-route timing number depends on it. This is the setting the
-course notes make with `setDesignMode -process 45`, and it matters more here
+wires*. Every pre-route timing number depends on it. The legacy command for it
+is `setDesignMode -process`, and it matters more here
 than on a commercial PDK because there is no QRC deck to override it later.
 
 **`read_mmmc`** — see §1b.
@@ -516,7 +515,7 @@ set_db cts_target_max_transition_time 0.40
 ccopt_design
 ```
 
-Note the command. The course notes say `set_ccopt_property target_skew
+Note the command. The legacy flow uses `set_ccopt_property target_skew
 0.10`; Stylus has no such command (`invalid command name
 "set_ccopt_property"`) and renames the properties as well —
 `target_max_trans` becomes `cts_target_max_transition_time`. `get_db cts_*`
@@ -785,7 +784,7 @@ available from there.
 It needs X11, so **log in with `ssh -X`**:
 
 ```bash
-ssh -X <your-user>@isaserver      # XQuartz must be running, on a Mac
+ssh -X isa      # XQuartz must be running, on a Mac
 cd ~/isa-lab1/lab1
 make pnr-gui
 ```
