@@ -11,7 +11,7 @@ consequences of your decisions, and the picture is the point. Only when the
 flow works do you go to §10 and run the scripts.
 
 Everything below is run from **this directory**
-(`lab1/implementation/innovus/`).
+(`implementation/innovus/`).
 
 ---
 
@@ -26,8 +26,8 @@ ls ../design_compiler/netlist/
 # cordic_accel.v  cordic_accel.sdf  cordic_accel.sdc  cordic_accel.ddc
 ```
 
-Three of those four are inputs here: the `.v` is the design, the `.sdc` is
-the constraint set it was built to, and the `.ddc` is not used. (The `.sdf`
+Two of those four are inputs here: the `.v` is the design and the `.sdc` is
+the constraint set it was built to. The `.ddc` is not used. (The `.sdf`
 belongs to the post-synthesis power analysis, one directory over.)
 
 **Source the EDA setup**, once per shell:
@@ -763,15 +763,18 @@ The whole flow:
 innovus -stylus -files scripts/run_pnr_flow.tcl -log artefacts/innovus
 ```
 
-or, from `lab1/`:
+or, from the repository root:
 
 ```bash
 make pnr                          # batch
 make pnr-gui                      # same scripts, GUI open, stops at the end
 make pnr PNR_UTIL=0.75            # denser floorplan
 make pnr PNR_ASPECT=2.0           # twice as wide as it is tall
-make pnr CLK_PERIOD=3.0           # re-synthesise at 3 ns first, then route it
 ```
+
+`make pnr` routes whatever netlist `make synth` last wrote; it does not
+re-synthesise. To route a design at another clock period, synthesise it at
+that period first: `make synth CLK_PERIOD=5.0 && make pnr-all`.
 
 ### Running it with the GUI
 
@@ -785,7 +788,7 @@ It needs X11, so **log in with `ssh -X`**:
 
 ```bash
 ssh -X isa      # XQuartz must be running, on a Mac
-cd ~/isa-lab1/lab1
+cd ~/lab1-example
 make pnr-gui
 ```
 
@@ -830,8 +833,9 @@ sweep that takes an afternoon and one that takes a week.
 
 ## 11. What this flow leaves out
 
-Everything here is a *block*. A chip needs four more things, and the SoC
-flow in this group's `scripts/` directory has one script for each:
+Everything here is a *block*. A chip needs four more things. The course's SoC
+flows (polHEEPo, HEEPatia) have one script for each; they are not part of
+this lab, but this is where each would go:
 
 | | what it is | where it would go |
 |---|---|---|
@@ -840,9 +844,9 @@ flow in this group's `scripts/` directory has one script for each:
 | **power intent** | a UPF file describing domains, isolation cells, retention flops, power switches — everything §5c of the synthesis README calls the real strategy | `read_power_intent` in `init.tcl` |
 | **seal ring** | the guard structure around the die edge | `fplan_io.tcl` |
 
-Read those scripts. They are four times the size of these, they do the same
-eight steps in the same order, and the difference between them is exactly
-the difference between a block and a chip.
+Those scripts are four times the size of these, but they do the same eight
+steps in the same order, and the difference between them is exactly the
+difference between a block and a chip.
 
 ---
 

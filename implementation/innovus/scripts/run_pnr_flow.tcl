@@ -1,5 +1,5 @@
 # ===========================================================================
-#  Place and route of cordic_accel, IHP SG13G2, Cadence Innovus.
+#  Place and route of $ACCEL (the top module), IHP SG13G2, Cadence Innovus.
 #
 #  Run from implementation/innovus/ :
 #

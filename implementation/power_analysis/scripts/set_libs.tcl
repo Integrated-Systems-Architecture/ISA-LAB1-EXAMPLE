@@ -5,7 +5,8 @@
 #  flow, at one twentieth the size: one standard cell library, no pads, no
 #  register files, no memories -- until you add one.
 #
-#  ANALYSIS_MODE picks the corner, and it is set by pwr_script.tcl.
+#  PWR_CORNER picks the corner (run_pwr_flow.sh sets it; the Makefile knob
+#  of the same name defaults to typ_1p20V_25C).
 #
 #  Which corner for power? Not the one you signed timing off at.
 #
@@ -18,37 +19,36 @@
 #  large factor. Neither number is the chip on a desk. Report typical, and
 #  say that is what you did.
 #
-#  PrimePower wants the compiled .db, exactly as Design Compiler does, and
-#  the synthesis flow already built and cached them under
-#  implementation/design_compiler/db/. Reusing them is not just convenient:
-#  the same .db in synthesis and in power analysis is one fewer thing that
-#  can silently differ.
+#  The netlist is the one synthesised at the slow corner; nothing is
+#  re-synthesised. PrimePower simply links the same cells against the
+#  typical-corner characterisation. It needs that Liberty compiled to a .db
+#  (read straight from the .lib it loses internal power and leakage), which
+#  run_pwr_flow.sh does once with lc_shell, into the same cache under
+#  implementation/design_compiler/db/ that synthesis uses.
 # ===========================================================================
 
-set DB_DIR $FLOW_ROOT/implementation/design_compiler/db
-
-set lib_std(tc) $DB_DIR/sg13g2_stdcell_typ_1p20V_25C.db
-set lib_std(wc) $DB_DIR/sg13g2_stdcell_slow_1p08V_125C.db
-set lib_std(bc) $DB_DIR/sg13g2_stdcell_fast_1p32V_m40C.db
+if {![info exists PWR_CORNER]} { set PWR_CORNER typ_1p20V_25C }
+if {![info exists PWR_DB]} {
+  set PWR_DB $FLOW_ROOT/implementation/design_compiler/db/sg13g2_stdcell_${PWR_CORNER}.db
+}
 
 # If you added an SRAM, its .db goes here too -- the macro burns power like
 # everything else, and a report that leaves it out is missing the biggest
-# single consumer in most accelerators.
+# single consumer in most accelerators. Compile its Liberty the same way.
 #
-#   set lib_mem(tc) $DB_DIR/RM_IHPSG13_1P_1024x32_c2_bm_bist_typ_1p20V_25C.db
-#   set target_library "$lib_std($ANALYSIS_MODE) $lib_mem($ANALYSIS_MODE)"
+#   set target_library "$PWR_DB $FLOW_ROOT/implementation/design_compiler/db/RM_IHPSG13_1P_1024x32_c2_bm_bist_typ_1p20V_25C.db"
 
-set target_library "$lib_std($ANALYSIS_MODE)"
-set link_library   "* $target_library"
-
-puts "------------------------------------------------------------------"
-puts "USED LIBRARIES ($ANALYSIS_MODE)"
-puts $link_library
-puts "------------------------------------------------------------------"
+set target_library "$PWR_DB"
 
 foreach db $target_library {
   if {![file exists $db]} {
-    error "missing $db -- run `make synth` in lab1/ so the .db cache is built,\n\
-           or `make synth SG13G2_CORNER=typ_1p20V_25C` for the typical corner"
+    error "missing $db -- run_pwr_flow.sh (make power) compiles it"
   }
 }
+
+set link_path "* $target_library"
+
+puts "------------------------------------------------------------------"
+puts "USED LIBRARIES ($PWR_CORNER)"
+puts $link_path
+puts "------------------------------------------------------------------"

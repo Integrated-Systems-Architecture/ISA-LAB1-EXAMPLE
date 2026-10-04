@@ -1,7 +1,7 @@
 # ===========================================================================
 #  Post-route optimisation and export, in a FRESH Innovus session.
 #
-#      make pnr-opt            (from lab1/, after `make pnr')
+#      make pnr-opt            (from the repository root, after `make pnr')
 #
 #  or by hand, from implementation/innovus/ :
 #

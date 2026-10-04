@@ -6,10 +6,21 @@
 #
 #      ./run_pwr_flow.sh                     # simulate, then analyse
 #      ./run_pwr_flow.sh --skip-sim          # reuse the VCD already there
-#      ./run_pwr_flow.sh --clk-ps 4000       # at 250 MHz instead
+#      ./run_pwr_flow.sh --sim-only          # just the VCD, no PrimePower
+#      ./run_pwr_flow.sh --clk-ps 20000      # same netlist, at 50 MHz
 #      ./run_pwr_flow.sh --postlayout        # the Innovus netlist, not DC's
 #
-#  or from lab1/ :   make power  /  make power-postlayout
+#  or from the repository root:   make power  /  make power-postlayout
+#
+#  The design comes from the environment, which the Makefile sets:
+#    ACCEL        top module                  (default cordic_accel)
+#    TB           testbench top               (default tb_$ACCEL)
+#    CORE         FuseSoC core                (default isa:lab1:$ACCEL)
+#    PWR_CORNER   Liberty corner for power    (default typ_1p20V_25C)
+#    IHP_PDK_ROOT the PDK                     (default /oss-tools/pdk/ihp-sg13g2)
+#
+#  The clock period of the simulation defaults to the one in the netlist's
+#  SDC, i.e. the frequency the netlist was synthesised (or routed) for.
 #
 #  The two runs measure different things and neither replaces the other:
 #
@@ -29,23 +40,30 @@
 #  Synopsys shell.
 #
 #  Prerequisites:
-#    source /eda/scripts/init_design_vision   (pt_shell / pwr_shell, vcd2saif)
-#    vsim on PATH
-#    make synth   in lab1/, so there is a netlist, an SDF and an SDC
-#    make pnr-all in lab1/, additionally, for --postlayout
+#    source /oss-tools/init.sh                (fusesoc, for the testbench file list)
+#    source /eda/scripts/init_questa_core_prime   (vsim)
+#    source /eda/scripts/init_design_vision   (pt_shell / pwr_shell)
+#    make synth, so there is a netlist, an SDF and an SDC
+#    make pnr-all, additionally, for --postlayout
 # ===========================================================================
 set -euo pipefail
 
 SKIP_SIM=0
+SIM_ONLY=0
 POSTLAYOUT=0
-CLK_PS=5000
-TOP_MODULE=cordic_accel
-TB=tb_cordic_accel
+CLK_PS=
+TOP_MODULE=${ACCEL:-cordic_accel}
+TB=${TB:-tb_${TOP_MODULE}}
+CORE=${CORE:-isa:lab1:${TOP_MODULE}}
+PWR_CORNER=${PWR_CORNER:-typ_1p20V_25C}
+export IHP_PDK_ROOT=${IHP_PDK_ROOT:-/oss-tools/pdk/ihp-sg13g2}
+# The testbench must instantiate the design under test with this name.
 DUT_INST=i_dut
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-sim)   SKIP_SIM=1; shift ;;
+    --sim-only)   SIM_ONLY=1; shift ;;
     --postlayout) POSTLAYOUT=1; shift ;;
     --clk-ps)   CLK_PS="$2"; shift 2 ;;
     --top)      TOP_MODULE="$2"; shift 2 ;;
@@ -67,14 +85,14 @@ if [[ $POSTLAYOUT -eq 1 ]]; then
   SPEF_FILE=$EXPORT/${TOP_MODULE}_pnr.spef
   VCD_FILE=$PWR_DIR/vcd/${TOP_MODULE}_pnr.vcd
   RPT=${TOP_MODULE}_pnr
-  BUILD_HINT="run 'make pnr-all' in lab1/ first"
+  BUILD_HINT="run 'make pnr-all' first"
 else
   NETLIST=$FLOW_ROOT/implementation/design_compiler/netlist/${TOP_MODULE}.v
   CONSTRAINTS=$FLOW_ROOT/implementation/design_compiler/netlist/${TOP_MODULE}.sdc
   SPEF_FILE=""
   VCD_FILE=$PWR_DIR/vcd/${TOP_MODULE}_syn.vcd
   RPT=${TOP_MODULE}
-  BUILD_HINT="run 'make synth' in lab1/ first"
+  BUILD_HINT="run 'make synth' first"
 fi
 
 # The instance path to strip off the VCD's hierarchy so it matches the
@@ -88,11 +106,33 @@ if [[ ! -f "$NETLIST" ]]; then
   exit 1
 fi
 
+# The clock period: the one the netlist was built for, unless overridden.
+# Both Design Compiler and Innovus write `create_clock ... -period <ns>`.
+if [[ -z "$CLK_PS" ]]; then
+  CLK_NS=$(grep -m1 -o 'create_clock.*-period *[0-9.]*' "$CONSTRAINTS" 2>/dev/null \
+           | grep -o '[0-9.]*$' || true)
+  [[ -n "$CLK_NS" ]] || { echo "ERROR: no create_clock -period in $CONSTRAINTS"; exit 1; }
+  CLK_PS=$(awk -v ns="$CLK_NS" 'BEGIN { printf "%d", ns * 1000 + 0.5 }')
+  echo "    clock period from $(basename "$CONSTRAINTS"): ${CLK_NS} ns"
+fi
+
 # --- 1. gate-level simulation, recording the VCD -------------------------
 if [[ $SKIP_SIM -eq 0 ]]; then
   echo "### [1/2] gate-level simulation at ${CLK_PS} ps clock period"
   command -v vsim >/dev/null || { echo "ERROR: vsim not on PATH"; exit 1; }
-  vsim -c -do "set POSTLAYOUT ${POSTLAYOUT}; set CLK_PERIOD_PS ${CLK_PS}; \
+  command -v fusesoc >/dev/null || { echo "ERROR: fusesoc not on PATH -- source /oss-tools/init.sh"; exit 1; }
+  # The testbench and everything it needs, exactly as `make questa` compiles
+  # it: let FuseSoC resolve the sim_questa target and write the compile
+  # script, without running it. gate_sim.do replays that script, then
+  # compiles the netlist on top so it replaces the RTL top module.
+  EDA_DIR=$FLOW_ROOT/build/gate/sim_questa-modelsim
+  (cd "$FLOW_ROOT" && fusesoc --cores-root . run --setup --build-root build/gate \
+     --target sim_questa "$CORE") > "$PWR_DIR/fusesoc_setup.log" 2>&1 \
+    || { echo "ERROR: fusesoc setup failed -- read $PWR_DIR/fusesoc_setup.log"; exit 1; }
+  rm -f "$VCD_FILE"
+  vsim -c -do "set LAB $FLOW_ROOT; set EDA_DIR $EDA_DIR; set TOP $TOP_MODULE; \
+               set TB $TB; set DUT_INST $DUT_INST; set VECDIR ${VECDIR:-$FLOW_ROOT/vectors}/; \
+               set POSTLAYOUT ${POSTLAYOUT}; set CLK_PERIOD_PS ${CLK_PS}; \
                do questa/gate_sim.do"
 else
   echo "### [1/2] skipped, reusing $VCD_FILE"
@@ -100,6 +140,7 @@ fi
 
 [[ -f "$VCD_FILE" ]] || { echo "ERROR: no VCD at $VCD_FILE"; exit 1; }
 echo "    VCD: $(du -h "$VCD_FILE" | cut -f1)"
+[[ $SIM_ONLY -eq 0 ]] || { echo "### done (--sim-only)"; exit 0; }
 
 # --- 2. power analysis ---------------------------------------------------
 # PrimePower is a mode of PrimeTime, so it runs in pt_shell. Some
@@ -133,6 +174,26 @@ if ! ldconfig -p 2>/dev/null | grep -q 'libodbc\.so\.2'; then
   fi
 fi
 
+# --- the typical-corner library, compiled once ---------------------------
+# PrimePower needs the Liberty compiled to a .db: it can read the .lib
+# directly, but then it drops the cells' internal power and leakage (the PDK
+# Liberty lacks the char_config attribute PrimeTime wants, LBDB-366) and
+# reports switching power only -- about half the real number, silently.
+# Library Compiler fills in the defaults when it compiles. The .db lands in
+# the same cache synthesis uses for its own (slow) corner. Nothing is
+# re-synthesised: the netlist is the slow-corner one, linked at typical.
+LIB_DIR=$IHP_PDK_ROOT/libs.ref/sg13g2_stdcell/lib
+PWR_DB=$FLOW_ROOT/implementation/design_compiler/db/sg13g2_stdcell_${PWR_CORNER}.db
+if [[ ! -f "$PWR_DB" ]]; then
+  echo "### compiling the ${PWR_CORNER} Liberty to a .db (once, cached)"
+  command -v lc_shell >/dev/null || { echo "ERROR: lc_shell not on PATH -- source /eda/scripts/init_design_vision"; exit 1; }
+  mkdir -p "$(dirname "$PWR_DB")"
+  lc_shell -x "read_lib $LIB_DIR/sg13g2_stdcell_${PWR_CORNER}.lib; \
+               write_lib sg13g2_stdcell_${PWR_CORNER} -format db -output $PWR_DB; quit" \
+    > "$PWR_DIR/lc_shell.log" 2>&1
+  [[ -f "$PWR_DB" ]] || { echo "ERROR: lc_shell wrote no $PWR_DB -- read $PWR_DIR/lc_shell.log"; exit 1; }
+fi
+
 echo "### [2/2] PrimePower"
 # pwr_shell exits 0 even when the script died on an error, so delete the
 # report first and insist it comes back. Without this a failed analysis is
@@ -155,6 +216,8 @@ $SHELL_BIN \
       set CONSTRAINTS $CONSTRAINTS; \
       set SPEF_FILE \"$SPEF_FILE\"; \
       set TOP_MODULE $TOP_MODULE; \
+      set PWR_CORNER $PWR_CORNER; \
+      set PWR_DB $PWR_DB; \
       set RPT $RPT; \
       set STRIP_PATH $STRIP_PATH" \
   -file scripts/pwr_script.tcl \

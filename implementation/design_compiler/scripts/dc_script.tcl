@@ -3,7 +3,7 @@
 #
 # The same script runs two ways:
 #
-#   through FuseSoC   make synth      (from lab1/)
+#   through FuseSoC   make synth      (from the repository root)
 #       edalize starts dc_shell in its own build directory and pre-defines
 #       TOP_MODULE, SCRIPT_DIR, REPORT_DIR and READ_SOURCES (the generated
 #       file list) before sourcing this script.

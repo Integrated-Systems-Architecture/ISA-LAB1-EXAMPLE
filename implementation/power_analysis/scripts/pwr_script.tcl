@@ -2,7 +2,7 @@
 #  pwr_script.tcl -- post-synthesis power analysis with Synopsys PrimePower.
 #
 #  Launched by run_pwr_flow.sh, which pre-defines FLOW_ROOT, VCD_FILE,
-#  NETLIST, TOP_MODULE and STRIP_PATH.
+#  NETLIST, TOP_MODULE, PWR_CORNER and STRIP_PATH.
 #
 #  This is the same script as the SoC flow's
 #  implementation/power_analysis/scripts/pwr_script.tcl, with the
@@ -38,8 +38,8 @@
 # ===========================================================================
 
 # Corner for the power numbers. See scripts/set_libs.tcl for why this is
-# `tc` and not the slow corner timing was signed off at.
-if {![info exists ANALYSIS_MODE]} { set ANALYSIS_MODE tc }
+# typical and not the slow corner timing was signed off at.
+if {![info exists PWR_CORNER]} { set PWR_CORNER typ_1p20V_25C }
 
 # Report file names. A post-layout run must not overwrite the
 # post-synthesis reports: comparing the two is the exercise.
@@ -70,7 +70,7 @@ source ./scripts/init.tcl
 # --- read the switching activity ----------------------------------------
 # -strip_path is the part of the hierarchy to remove. The VCD was recorded
 # inside a testbench, so every instance in it is called
-# tb_cordic_accel/i_dut/<something>; the netlist calls the same instance
+# <tb>/i_dut/<something>; the netlist calls the same instance
 # just <something>. Strip the prefix and the two line up.
 #
 # Get this wrong and read_vcd succeeds, annotates nothing, and

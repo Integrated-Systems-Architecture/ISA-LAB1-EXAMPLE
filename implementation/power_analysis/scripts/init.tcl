@@ -3,7 +3,7 @@
 #
 #  Same three steps as the SoC flow's common/primetime/init.tcl. Sourced by
 #  pwr_script.tcl, which has already set FLOW_ROOT, NETLIST, TOP_MODULE and
-#  ANALYSIS_MODE.
+#  PWR_CORNER.
 # ===========================================================================
 
 set REPORTS_PATH ./reports
@@ -40,11 +40,11 @@ link_design -verbose
 #
 # One line has to go first. Innovus starts its SDC with
 #
-#     current_design cordic_accel
+#     current_design <top>
 #
 # and PrimeTime's read_sdc refuses it:
 #
-#     Error: extra positional option 'cordic_accel' (CMD-012)
+#     Error: extra positional option '<top>' (CMD-012)
 #     script ... stopped at line 8 due to error. (CMD-081)
 #
 # It stops reading there, so the clock is never defined -- and a power
@@ -66,7 +66,7 @@ if {[file exists $CONSTRAINTS]} {
   close $fh_out
   read_sdc $SDC_PT
 } else {
-  error "missing $CONSTRAINTS -- run `make synth` in lab1/ first"
+  error "missing $CONSTRAINTS -- run `make synth` in the repository root first"
 }
 
 # --- parasitics, post-layout only ---------------------------------------
@@ -77,7 +77,7 @@ if {[file exists $CONSTRAINTS]} {
 # estimated capacitance and only half the answer is post-layout.
 if {[info exists SPEF_FILE] && $SPEF_FILE ne ""} {
   if {![file exists $SPEF_FILE]} {
-    error "missing $SPEF_FILE -- run `make pnr-all` in lab1/ first"
+    error "missing $SPEF_FILE -- run `make pnr-all` in the repository root first"
   }
   puts "reading parasitics: $SPEF_FILE"
   read_parasitics -format spef $SPEF_FILE

@@ -8,7 +8,7 @@ synthesis. This page is about why that number is not an answer, and what to
 do instead.
 
 Everything below is run from **this directory**
-(`lab1/implementation/power_analysis/`).
+(`implementation/power_analysis/`), or through `make` from the repository root.
 
 ---
 
@@ -50,7 +50,7 @@ to a tool that knows what each cell costs per transition.
    synthesis                  simulation                  power analysis
   ┌───────────┐              ┌───────────┐               ┌────────────┐
   │    DC     │─ netlist.v ─▶│ QuestaSim │── design.vcd ─▶│ PrimePower │
-  │           │─ netlist.sdf▶│  + cells  │               │  + .db     │─▶ W
+  │           │─ netlist.sdf▶│  + cells  │               │  + typ .db │─▶ W
   │           │─ netlist.sdc──────────────────────────────▶            │
   └───────────┘              └───────────┘               └────────────┘
 ```
@@ -80,43 +80,46 @@ source /eda/scripts/init_design_vision
 ```
 
 This puts `pt_shell` (or `pwr_shell`), `vcd2saif` and friends on your PATH.
-You also need `vsim`.
+You also need `vsim` (`source /eda/scripts/init_questa_core_prime`) and
+FuseSoC (`source /oss-tools/init.sh`): the gate-level simulation takes the
+testbench file list from FuseSoC, exactly as `make questa` does.
 
-**You need a synthesised design.** From `lab1/`:
+**You need a synthesised design.** From the repository root:
 
 ```bash
 make synth
 ls implementation/design_compiler/netlist/
 # cordic_accel.v  cordic_accel.sdf  cordic_accel.sdc
-ls implementation/design_compiler/db/
-# sg13g2_stdcell_slow_1p08V_125C.db
 ```
 
-All four are used here. The `.db` cache is the same one the synthesis built
-— reusing it is not just convenient, it is one fewer thing that can
-silently differ between the two analyses.
-
-**Build the typical-corner `.db` as well**, because that is the corner you
-want power at (§4):
-
-```bash
-make synth SG13G2_CORNER=typ_1p20V_25C
-```
+That netlist was synthesised, and its timing signed off, at the **slow**
+corner. Power is measured on the **same netlist** at the **typical** corner
+(§5): PrimePower links it against the PDK's typical-corner library. Nothing is
+re-synthesised. The one preparation step is compiling that Liberty to a `.db`
+with `lc_shell`, which `run_pwr_flow.sh` does the first time and caches under
+`implementation/design_compiler/db/`, next to the slow-corner one synthesis
+built. (PrimePower *can* read the `.lib` itself, but then it silently drops
+the cells' internal power and leakage and reports switching power only —
+about half the real figure. Compile it.)
 
 ---
 
 ## 2. The whole thing, in one command
 
 ```bash
-cd implementation/power_analysis
-./run_pwr_flow.sh
+make power                      # from the repository root
 ```
 
-or from `lab1/`:
+or, from this directory (`make` sets these for you):
 
 ```bash
-make power
+ACCEL=cordic_accel ./run_pwr_flow.sh
 ```
+
+The clock period of the simulation is read from the netlist's SDC, so the
+design is measured at the frequency it was synthesised for. `--clk-ps <ps>`
+(or `make power PWR_CLK_PS=<ps>`) overrides it — only ever to something
+slower than the constraint.
 
 Then read `reports/cordic_accel_power.rpt`.
 
@@ -127,7 +130,9 @@ each step has a way of going quietly wrong.
 
 ## 3. Step 1 — gate-level simulation, recording switching activity
 
-`questa/gate_sim.do`, or by hand from this directory.
+`questa/gate_sim.do`, run by `run_pwr_flow.sh`, or by hand from this
+directory once `make power-sim` has run (it writes the FuseSoC compile script
+the `.do` file replays).
 
 Three things make this a *post-synthesis* simulation rather than an RTL one,
 and all three matter:
@@ -183,6 +188,15 @@ file, driving the same stimulus, checking the same golden vectors. That is
 the point: if the gate-level run does not also print `TEST PASSED`, the
 netlist is wrong and any power number from it is meaningless.
 
+Nothing in `gate_sim.do` lists the testbench's files by hand.
+`run_pwr_flow.sh` asks FuseSoC to set up the `sim_questa` target without
+running it (`fusesoc run --setup --build-root build/gate ...`), and
+`gate_sim.do` replays the `vlog` commands FuseSoC wrote, adding
+`+define+GATE_LEVEL`. That also compiles the RTL of the design, which is
+harmless: the netlist is compiled **after** it, into the same library, and a
+module compiled later replaces one of the same name. The testbench therefore
+instantiates the netlist.
+
 Two things in it exist for this flow:
 
 - `+define+GATE_LEVEL` makes the testbench instantiate the DUT **without a
@@ -193,8 +207,9 @@ Two things in it exist for this flow:
   the two builds are the same configuration.
 - `ClkPeriodPs` is a parameter, so the run can be done at the frequency the
   design was synthesised for: `vsim -g/tb_cordic_accel/ClkPeriodPs=5000`.
-  Power scales with frequency. Measuring a block at 100 MHz that was
-  constrained at 200 MHz halves the dynamic power and answers nothing.
+  `run_pwr_flow.sh` sets it from the SDC. Power scales with frequency:
+  measuring a block at 100 MHz that was constrained at 200 MHz halves the
+  dynamic power and answers nothing.
 
 **Recording the activity:**
 
@@ -238,7 +253,8 @@ set power_analysis_mode          averaged
 the *peak*, which is what an IR drop or a decap budget needs. Much slower.
 
 ```tcl
-read_db    $target_library
+read_db    $target_library      ;# sg13g2_stdcell_typ_1p20V_25C.db
+set link_path "* $target_library"
 read_verilog $NETLIST
 current_design cordic_accel
 link_design
@@ -304,8 +320,8 @@ directions:
   **over**-reports it by a large factor.
 
 Neither is the chip on a desk. Report typical, and say in your report that
-that is what you did. `scripts/set_libs.tcl` selects it with
-`ANALYSIS_MODE`.
+that is what you did. `scripts/set_libs.tcl` selects it with `PWR_CORNER`
+(the Makefile knob of the same name, default `typ_1p20V_25C`).
 
 ---
 
@@ -314,23 +330,23 @@ that is what you did. `scripts/set_libs.tcl` selects it with
 So you know what a working run looks like, at 100 MHz on the typical corner:
 
 ```
-  Net Switching Power  = 4.347e-04   (53.49%)
-  Cell Internal Power  = 3.775e-04   (46.45%)
-  Cell Leakage Power   = 4.613e-07   ( 0.06%)
+  Net Switching Power  = 4.381e-04   (53.34%)
+  Cell Internal Power  = 3.828e-04   (46.60%)
+  Cell Leakage Power   = 4.709e-07   ( 0.06%)
                          ---------
-Total Power            = 8.127e-04  (100.00%)
+Total Power            = 8.213e-04  (100.00%)
 ```
 
 and by group:
 
 | group | share |
 |-------|-------|
-| combinational | 52 % |
+| combinational | 53 % |
 | **clock network** | **34 %** |
-| register | 14 % |
+| register | 13 % |
 | leakage | 0.06 % |
 
-with `report_switching_activity` showing **2577 of 2577 nets (100 %)
+with `report_switching_activity` showing **2613 of 2613 nets (100 %)
 annotated from the activity file** — which is the line that says the flow
 actually worked.
 
@@ -343,7 +359,7 @@ does not reduce it: the gates hang off the tree's leaves and the tree keeps
 toggling above them. Only stopping the clock at the root does — §5c of the
 synthesis README, now with a number attached.
 
-**Leakage is 0.02 %.** At 130 nm, at 25 °C, static power is a rounding
+**Leakage is 0.06 %.** At 130 nm, at 25 °C, static power is a rounding
 error, and every watt worth chasing is dynamic. That is a property of this
 node, not a general truth — the same block at 16 nm would tell a very
 different story, and it is why power gating exists.
@@ -417,13 +433,13 @@ cost power.
 Once `../innovus/` has run, measure again on what was actually built:
 
 ```bash
-make power-postlayout     # from lab1/
+make power-postlayout     # from the repository root
 ```
 
 or, by hand from this directory:
 
 ```bash
-./run_pwr_flow.sh --postlayout
+ACCEL=cordic_accel ./run_pwr_flow.sh --postlayout
 ```
 
 Three inputs change, and `--postlayout` switches all of them together:
@@ -446,7 +462,7 @@ On the shipped CORDIC at 10 ns, typical corner:
 clock_network            33.6 %           28.5 %
 register                 13.4 %           13.8 %
 combinational            53.0 %           57.8 %
-Total                  0.821 mW         1.172 mW
+Total                  0.821 mW         1.171 mW
 ```
 
 43 % more power after layout, and none of it is a mistake: the clock tree is
@@ -456,9 +472,8 @@ post-layout number, and say which one it is.
 Two things to know before you read the numbers:
 
 * **The corner is `typ_1p20V_25C`, not the slow corner timing was signed off
-  at** -- see §5. `make power` and `make power-postlayout` both compile that
-  Liberty into `design_compiler/db/` the first time they need it, with
-  `lc_shell`; synthesis only caches the corner it ran at.
+  at** -- see §5. Both runs use the same `.db` of that Liberty, compiled once
+  by `run_pwr_flow.sh`.
 * **Innovus writes `current_design <top>` at the top of its SDC and
   PrimeTime refuses it** (`CMD-012`), stopping the SDC read at line 8 --
   which leaves the design with no clock and reports `clock_network` as
@@ -479,11 +494,11 @@ comparing is a good use of an afternoon.
 power_analysis/
 ├── run_pwr_flow.sh          simulate, then analyse. Start here.
 ├── questa/
-│   └── gate_sim.do          gate-level sim + SDF + VCD recording
+│   └── gate_sim.do          gate-level sim (FuseSoC's tb file list + netlist) + VCD
 ├── scripts/
 │   ├── pwr_script.tcl       the PrimePower flow
 │   ├── init.tcl             read libraries, netlist, constraints, SPEF
-│   ├── set_libs.tcl         which .db, which corner
+│   ├── set_libs.tcl         which Liberty, which corner
 │   └── gen_pwr_csv.tcl      per-cell CSV dump
 ├── vcd/                     generated, large, gitignored
 └── reports/                 generated

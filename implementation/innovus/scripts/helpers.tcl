@@ -37,7 +37,7 @@ proc check_inputs {} {
   global design
   foreach f [list $design(netlist) $design(default_sdc)] {
     if {![file exists $f]} {
-      error "missing $f -- run `make synth` in lab1/ first"
+      error "missing $f -- run `make synth` in the repository root first"
     }
   }
   foreach f $design(ALL_LEFS) {

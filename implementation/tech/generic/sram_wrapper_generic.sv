@@ -9,8 +9,8 @@
 //    synthesis   -> ../sg13g2/sram_wrapper_sg13g2.sv, a real SRAM macro out
 //                   of the PDK
 //
-//  The choice is made in cordic_accel.core, by the `tech-generic` and
-//  `tech-sg13g2` filesets, and every target picks exactly one.
+//  The choice is made in cordic_accel.core, by the `mem-generic` and
+//  `mem-sg13g2` filesets, and every target picks exactly one.
 //
 //  Why bother, when tc_sram elaborates perfectly well? Because a synthesis
 //  tool handed tc_sram does not refuse it -- it builds you the array out of

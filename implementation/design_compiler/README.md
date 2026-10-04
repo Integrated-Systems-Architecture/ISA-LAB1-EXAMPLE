@@ -15,7 +15,7 @@ it back into scripts and drive it from FuseSoC, which is how you will actually
 run the sweeps.
 
 Everything below is run from **this directory**
-(`lab1/implementation/design_compiler/`).
+(`implementation/design_compiler/`).
 
 ---
 
@@ -232,7 +232,7 @@ analyze -f sverilog -lib WORK ../../rtl/cordic_accel.sv
 ```
 
 If `cordic_accel_reg_pkg.sv` or `cordic_accel_reg_top.sv` is missing, you have
-not generated the CSR block yet: `make regs` in `lab1/`.
+not generated the CSR block yet: `make regs` in the repository root.
 
 Before elaborating, ask the tool to keep the RTL hierarchy names in the
 netlist:
@@ -523,8 +523,9 @@ report_power
 
 `report_power` here is an *estimate* from statistical switching assumptions.
 The real number needs switching activity from a simulation — that is the
-`vcd` → `saif` → `read_saif` → `report_power` flow, and it comes later in the
-lab.
+flow in `../power_analysis/`: a gate-level simulation writes a VCD, and
+PrimePower reads it with `read_vcd` before `report_power`. It comes later in
+the lab.
 
 ---
 
@@ -626,7 +627,7 @@ version — the simulation file list and the synthesis file list drift apart,
 and you synthesise something you never simulated.
 
 FuseSoC already knows the file list: it is the same `.core` dependency tree
-that `make sim` uses. The `synth` target in `lab1/cordic_accel.core` points
+that `make sim` uses. The `synth` target in `cordic_accel.core` points
 Design Compiler at it:
 
 ```yaml
@@ -651,9 +652,11 @@ corner and compiles the `.db`. One place decides, and it is the script.
 and the Makefile wraps it:
 
 ```bash
-make synth                                    # from lab1/
+make synth                                    # from the repository root
 make synth CLK_PERIOD=3.0                     # tighten the constraint
-make synth SG13G2_CORNER=typ_1p20V_25C        # a different corner
+make synth SG13G2_CORNER=typ_1p20V_25C        # a different timing corner (not for power:
+                                              # power reads the slow netlist at typ, see
+                                              # ../power_analysis/)
 make synth IHP_PDK_ROOT=/where/the/pdk/is     # a different PDK location
 ```
 
@@ -666,7 +669,7 @@ generated list instead of `analyze_sources.tcl`; run standalone, it falls back
 to the hand-written one. Same script, same result, one source of truth for the
 file list.
 
-Two consequences worth understanding:
+Three consequences worth understanding:
 
 - `dc_shell` runs in `build/isa_lab1_cordic_accel_0.1.0/synth-design_compiler/`,
   not here. That is why every path in the `.core` climbs three directories,
@@ -682,10 +685,15 @@ Two consequences worth understanding:
 Sweeping the clock is now one line:
 
 ```bash
-for p in 8.0 6.0 5.0 4.0 3.0 2.5; do make synth CLK_PERIOD=$p; done
+for p in 10.0 8.0 6.0 5.0 4.0 3.5 3.0; do
+  make synth CLK_PERIOD=$p
+  cp implementation/design_compiler/reports/qor.rpt qor_$p.rpt   # each run overwrites reports/
+done
 ```
 
-which is the point of having a script at all.
+which is the point of having a script at all. Keep a copy of each run's
+`qor.rpt` (or grep the slack and area out of it) before the next one: every
+`make synth` writes the same `reports/` directory.
 
 ---
 
@@ -795,7 +803,7 @@ time, then run the scripts. It is where the clock stops being ideal and
 where the wire capacitance stops being a guess.
 
 ```bash
-make pnr          # from lab1/, after make synth
+make pnr          # from the repository root, after make synth
 ```
 
 **`../power_analysis/` — what does it actually burn.** The `report_power`
@@ -805,7 +813,7 @@ doing the real work in QuestaSim, record the switching activity, and hand
 it to PrimePower.
 
 ```bash
-make power        # from lab1/, after make synth
+make power        # from the repository root, after make synth
 ```
 
 That is also where §5c stops being an argument and becomes a measurement:

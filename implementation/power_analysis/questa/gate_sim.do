@@ -2,7 +2,8 @@
 #  gate_sim.do -- gate-level simulation of the synthesised netlist, with
 #  SDF back-annotation, recording switching activity into a VCD.
 #
-#  Run from implementation/power_analysis/ :
+#  Normally run by run_pwr_flow.sh (`make power`, `make power-sim`). By
+#  hand, from implementation/power_analysis/, once `make power-sim` has run:
 #
 #      vsim -c -do questa/gate_sim.do
 #
@@ -32,12 +33,18 @@
 # ===========================================================================
 
 # --- where everything is ---------------------------------------------------
-# Overridable:  vsim -c -do "set CLK_PERIOD_PS 4000; do questa/gate_sim.do"
-if {![info exists LAB]}           { set LAB           ../.. }
-if {![info exists TOP]}           { set TOP           cordic_accel }
-if {![info exists TB]}            { set TB            tb_cordic_accel }
+# run_pwr_flow.sh sets all of these; the defaults are for a by-hand run from
+# implementation/power_analysis/ after `make power-sim` has run once (that is
+# what writes the FuseSoC compile script under build/gate/).
+if {![info exists LAB]}           { set LAB           [file normalize ../..] }
+if {![info exists TOP]} {
+  if {[info exists ::env(ACCEL)]} { set TOP $::env(ACCEL) } else { set TOP cordic_accel }
+}
+if {![info exists TB]}            { set TB            tb_${TOP} }
 if {![info exists DUT_INST]}      { set DUT_INST      i_dut }
-if {![info exists CLK_PERIOD_PS]} { set CLK_PERIOD_PS 5000 }
+if {![info exists CLK_PERIOD_PS]} { set CLK_PERIOD_PS 10000 }
+if {![info exists EDA_DIR]}       { set EDA_DIR       ${LAB}/build/gate/sim_questa-modelsim }
+if {![info exists VECDIR]}        { set VECDIR        ${LAB}/vectors/ }
 if {![info exists PDK]} {
   if {[info exists ::env(IHP_PDK_ROOT)]} {
     set PDK $::env(IHP_PDK_ROOT)
@@ -45,12 +52,13 @@ if {![info exists PDK]} {
     set PDK /oss-tools/pdk/ihp-sg13g2
   }
 }
+set HERE [pwd]
 
 # Which netlist to measure. Default is the SYNTHESIS one; set POSTLAYOUT to
 # use the place-and-routed one instead, which is the accurate measurement:
 # it has the clock tree in it and its parasitics come from real wires.
 #
-#     vsim -c -do "set POSTLAYOUT 1; set USE_SDF 1; do questa/gate_sim.do"
+#     vsim -c -do "set POSTLAYOUT 1; do questa/gate_sim.do"
 #
 if {![info exists POSTLAYOUT]} { set POSTLAYOUT 0 }
 if {$POSTLAYOUT} {
@@ -62,96 +70,69 @@ if {$POSTLAYOUT} {
   set SDF      ${LAB}/implementation/design_compiler/netlist/${TOP}.sdf
   set VCD_NAME ${TOP}_syn.vcd
 }
-set VENDOR   ${LAB}/vendor/pulp_platform
-set VECDIR   ${LAB}/vectors/
 # TWO files, and both are needed. sg13g2_stdcell.v is the cell models;
 # sg13g2_udp.v holds the user-defined primitives (`ihp_latch', `ihp_dff', ...)
 # that those models are built out of. Compile the cells without the UDPs and
 # every sequential cell is an unresolved module.
 set CELLS    ${PDK}/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 set UDPS     ${PDK}/libs.ref/sg13g2_stdcell/verilog/sg13g2_udp.v
+set TB_TCL   ${EDA_DIR}/edalize_build_rtl.tcl
 
-foreach f [list $NETLIST $SDF $CELLS $UDPS] {
+foreach f [list $NETLIST $SDF $CELLS $UDPS $TB_TCL] {
   if {![file exists $f]} {
     echo "ERROR: missing $f"
     if {$f eq $NETLIST || $f eq $SDF} {
       if {$POSTLAYOUT} {
-        echo "  -> run `make pnr` in lab1/ first (POSTLAYOUT is set)"
+        echo "  -> run `make pnr-all` first (POSTLAYOUT is set)"
       } else {
-        echo "  -> run `make synth` in lab1/ first"
+        echo "  -> run `make synth` first"
       }
     }
-    if {$f eq $CELLS}                 { echo "  -> set IHP_PDK_ROOT" }
+    if {$f eq $CELLS}  { echo "  -> set IHP_PDK_ROOT" }
+    if {$f eq $TB_TCL} { echo "  -> run `make power-sim` once: it writes the testbench compile script" }
     quit -f
   }
 }
 
 # --- compile ---------------------------------------------------------------
+# Everything is compiled in FuseSoC's build directory, because the compile
+# script it wrote uses paths relative to it. The VCD still lands here.
+cd $EDA_DIR
 file delete -force work
 vlib work
 
-# The library cell models. `-suppress 2286` silences the "module already
-# defined" noise from the `celldefine wrappers.
-# UDPs first: the cell models instantiate them.
+# The testbench and everything it needs. Exactly the same files, flags and
+# order as `make questa`, exactly the same stimulus -- that is the point.
+# FuseSoC wrote the list from the `sim_questa` target of the .core, so
+# nothing here is written by hand and nothing can drift.
+#
+# The one difference is +define+GATE_LEVEL, which tells the testbench to
+# instantiate the DUT without a parameter override, because a gate-level
+# netlist has no parameters left.
+#
+# The list also compiles the RTL of the design itself. That is harmless: the
+# netlist is compiled AFTER it, into the same library, and a module compiled
+# later replaces one of the same name (vlog says so, warning 2275). So the
+# top module the testbench instantiates is the netlist's, and any RTL
+# submodule the netlist does not define is simply never instantiated.
+echo "### compiling the testbench (FuseSoC's sim_questa file list)"
+set fh [open $TB_TCL r]
+foreach line [split [read $fh] "\n"] {
+  if {[regexp {^\s*vlog\s} $line]} {
+    eval $line +define+GATE_LEVEL
+  }
+}
+close $fh
+
+# The library cell models. UDPs first: the cell models instantiate them.
 echo "### compiling SG13G2 cell models"
 vlog -work work -quiet -timescale 1ns/1ps $UDPS
 vlog -work work -quiet -timescale 1ns/1ps $CELLS
 
-# The netlist. Plain Verilog: Design Compiler wrote it with
-# `change_names -rules verilog`, so nothing in it needs SystemVerilog.
-echo "### compiling the netlist"
-vlog -work work -quiet -timescale 1ns/1ps $NETLIST
-
-# The testbench and everything it needs. Exactly the same files as
-# `make questa`, exactly the same stimulus -- that is the point. The one
-# difference is +define+GATE_LEVEL, which tells the testbench to
-# instantiate the DUT without a parameter override, because a gate-level
-# netlist has no parameters left.
-echo "### compiling the testbench"
-
-# The list below is `make questa`'s dependency tree with the `rtl` fileset
-# replaced by the netlist: the vendored IPs the TESTBENCH needs, in
-# dependency order, packages first.
-#
-# cordic_pkg is still here even though the netlist does not need it -- the
-# testbench imports it for the fixed-point helpers it checks results with.
-#
-# This list is written by hand and `make questa`'s is written by FuseSoC,
-# so the two can drift. If a vendored IP gains a file, this is where you
-# will find out, the hard way. `fusesoc ... run --setup --target sim_questa`
-# prints the authoritative order into the build directory.
-set TB_SRC [list \
-  ${VENDOR}/common_cells/src/cf_math_pkg.sv \
-  ${VENDOR}/common_cells/src/lzc.sv \
-  ${VENDOR}/common_cells/src/fifo_v3.sv \
-  ${VENDOR}/common_cells/src/rr_arb_tree.sv \
-  ${VENDOR}/register_interface/src/reg_intf.sv \
-  ${VENDOR}/register_interface/src/reg_test.sv \
-  ${VENDOR}/obi/src/obi_pkg.sv \
-  ${VENDOR}/obi/src/obi_intf.sv \
-  ${VENDOR}/obi/src/obi_mux.sv \
-  ${VENDOR}/obi/src/test/obi_test.sv \
-  ${VENDOR}/obi/src/test/obi_sim_mem.sv \
-  ${LAB}/rtl/cordic_pkg.sv \
-  ${LAB}/tb/tb_cordic_accel.sv ]
-
-foreach f $TB_SRC {
-  if {![file exists $f]} { echo "ERROR: $f not found -- run `make vendor`" ; quit -f }
-  # Same flags as the `sim_questa' target in cordic_accel.core, and for the
-  # same reasons -- see the comment there:
-  #   -timescale   the RTL declares no timeunit, the vendored IPs do, and
-  #                Questa refuses to elaborate the mixture (vsim-3009)
-  #   13276        the OBI_ASSIGN_* macros type-check a branch that
-  #                ObiDefaultConfig makes dead
-  vlog -sv -work work -quiet \
-       -timescale 1ns/1ps \
-       +incdir+${VENDOR}/common_cells/include \
-       +incdir+${VENDOR}/register_interface/include \
-       +incdir+${VENDOR}/obi/include \
-       +define+GATE_LEVEL \
-       -suppress 2583 -suppress 13314 -suppress 13276 \
-       $f
-}
+# The netlist, last. Plain Verilog: both Design Compiler and Innovus write it
+# with Verilog-safe names, so nothing in it needs SystemVerilog.
+echo "### compiling the netlist: $NETLIST"
+vlog -work work -quiet -timescale 1ns/1ps -suppress 2275 $NETLIST
 
 # --- elaborate with timing -------------------------------------------------
 # -sdftyp annotates the typical delays from the SDF onto the DUT instance.
@@ -238,9 +219,9 @@ vsim -c -t 1ps \
 # The scope is the DUT and everything below it. Not the testbench: the
 # behavioural memory model and the bus drivers do not exist in silicon and
 # their toggling is not power.
-file mkdir vcd
+file mkdir ${HERE}/vcd
 echo "### recording VCD to vcd/${VCD_NAME}"
-vcd file vcd/${VCD_NAME}
+vcd file ${HERE}/vcd/${VCD_NAME}
 vcd add -r /${TB}/${DUT_INST}/*
 
 # Run to the end of the stimulus. The testbench calls $finish when it is
@@ -249,4 +230,5 @@ vcd add -r /${TB}/${DUT_INST}/*
 run -all
 
 vcd flush
+cd $HERE
 quit -f
