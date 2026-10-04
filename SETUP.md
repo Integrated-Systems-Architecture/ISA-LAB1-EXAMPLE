@@ -10,9 +10,10 @@ Lab 1 needs two toolchains, and they are not the same one:
 | **open source** | Verilator, FuseSoC, Python, reggen | `/oss-tools` on the ISA server, or you install it |
 | **commercial EDA** | QuestaSim, Design Compiler, Innovus, PrimePower | `/eda` on the ISA server, **licence-locked** |
 
-Everything from `make sim` down to `make lint` runs anywhere. **Everything from
-`make synth` onwards runs only on the ISA server**, because that is where the
-licences are. Plan on doing the RTL work wherever you like and the
+The RTL half (`make vendor`, `regs`, `vectors`, `lint`, `sim`) runs anywhere;
+`make questa` runs wherever you have QuestaSim (the server, or the free Starter
+Edition on Linux/Windows). **Everything from `make synth` onwards runs only on
+the ISA server**, because that is where the licences are. Plan on doing the RTL work wherever you like and the
 implementation work on the server.
 
 Supported hosts for the open-source half: **the ISA server** (nothing to
@@ -179,12 +180,12 @@ If `IHP_PDK_ROOT` is unset the flow falls back to the same
 `/oss-tools/pdk/ihp-sg13g2`, so on the server you can leave it alone. Set it if
 you are told the PDK has moved, or if you are running somewhere else.
 
-### 5. Get your repository and check the flow
+### 5. Get this repository and check the flow
 
 ```bash
 cd ~
-git clone <your-group-repo> isa-lab1
-cd isa-lab1/lab1
+git clone https://github.com/Integrated-Systems-Architecture/ISA-LAB1-EXAMPLE.git lab1-example
+cd lab1-example
 
 make vendor      # fetch the pulp IPs into vendor/
 make regs        # reggen: data/cordic_accel.hjson -> the CSR block
@@ -194,7 +195,7 @@ make sim         # Verilator, self-checking -> TEST PASSED
 `make sim` should end with:
 
 ```
-[TB] 64 angles from /home/<you>/isa-lab1/lab1/vectors/
+[TB] 64 angles from /home/<you>/lab1-example/vectors/
 [TB] run1 (cos/sin): 64/64 results match the golden model
 [TB] run2 (seed +90): 64/64 results match the golden model
 TEST PASSED
@@ -203,7 +204,7 @@ TEST PASSED
 That is the open-source half working. For the commercial half:
 
 ```bash
-make synth       # Design Compiler -> a netlist. Takes a few minutes.
+make synth       # Design Compiler -> a netlist. About three minutes.
 ```
 
 The first run also compiles the PDK's Liberty into the `.db` Design Compiler
@@ -248,17 +249,22 @@ those need licences that live on the server.
 
 | tool | needed for | how |
 |------|------------|-----|
-| Python 3.11 + FuseSoC + hjson | `make vendor`, `make regs`, `make vectors` | as in Lab 0 |
+| Python + the `x-heep` conda environment | `make vendor`, `make regs`, `make vectors` | as in Lab 0 |
 | Verilator 5.040 | `make sim`, `make lint` | as in Lab 0 |
 | QuestaSim | `make questa` | free Intel/Altera Starter Edition, Linux and Windows only |
 | GTKWave | looking at the traces | as in Lab 0 |
 
-If you already did Lab 0's setup, the first two are done — Lab 1 adds no
-Python packages. Reuse the same conda environment:
+Use the **`x-heep` conda environment from Lab 0**: it already has FuseSoC and
+every package reggen imports (`hjson`, `mako`, `tabulate`, `pyyaml`, and
+`setuptools<81` for `pkg_resources`). Lab 1 adds nothing to it. Do not build a
+fresh environment with just FuseSoC and hjson — `make regs` then fails one
+missing import at a time. If you no longer have it, recreate it exactly as
+Lab 0's `SETUP.md` says (`conda create -n x-heep python=3.12`, then
+`pip install -r requirements.txt` from your Lab 0 repository).
 
 ```bash
 conda activate x-heep
-cd lab1 && make vendor && make regs && make sim
+cd lab1-example && make vendor && make regs && make sim
 ```
 
 ### QuestaSim on your own machine

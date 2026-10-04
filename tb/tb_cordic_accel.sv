@@ -140,6 +140,22 @@ module tb_cordic_accel;
   // --------------------------------------------------------------------
   obi_req_t dut_obi_req, tb_obi_req;
   obi_rsp_t dut_obi_rsp, tb_obi_rsp;
+  obi_rsp_t dut_obi_rsp_mux;   // the mux's response to the DUT, undelayed
+
+  // At gate level the response reaches the DUT ApplDelay after the clock
+  // edge, like every other input the testbench drives. obi_mux is testbench
+  // RTL on the IDEAL clock, so its outputs change exactly at the edge, while
+  // the routed DUT's flops see that edge only after the clock tree's
+  // insertion delay. Undelayed, a response that changes at the edge is
+  // captured one cycle early -- a hold violation that exists only in the
+  // testbench, and that makes a correct post-layout netlist (simulated with
+  // its SDF) fail its self-check. At RTL there is no clock tree and the
+  // plain assignment is right; Verilator also mis-schedules the delayed one.
+`ifdef GATE_LEVEL
+  assign #(ApplDelay) dut_obi_rsp = dut_obi_rsp_mux;
+`else
+  assign dut_obi_rsp = dut_obi_rsp_mux;
+`endif
 
   OBI_BUS_DV #(
     .OBI_CFG          ( ObiCfg           ),
@@ -178,7 +194,7 @@ module tb_cordic_accel;
     .rst_ni          ( rst_n                     ),
     .testmode_i      ( 1'b0                      ),
     .sbr_ports_req_i ( {tb_obi_req, dut_obi_req} ),
-    .sbr_ports_rsp_o ( {tb_obi_rsp, dut_obi_rsp} ),
+    .sbr_ports_rsp_o ( {tb_obi_rsp, dut_obi_rsp_mux} ),
     .mgr_port_req_o  ( mem_req                   ),
     .mgr_port_rsp_i  ( mem_rsp                   )
   );

@@ -1,8 +1,8 @@
 CAPI=2:
 # FuseSoC core for the standalone CORDIC accelerator and its testbench.
 #
-#   fusesoc --cores-root . --cores-root vendor run --target sim        isa:lab1:cordic_accel
-#   fusesoc --cores-root . --cores-root vendor run --target sim_questa isa:lab1:cordic_accel
+#   fusesoc --cores-root . run --target sim        isa:lab1:cordic_accel
+#   fusesoc --cores-root . run --target sim_questa isa:lab1:cordic_accel
 #
 # The Makefile wraps both (make sim / make questa). Read this file: it is the
 # same .core format that pulls the accelerator into X-HEEP in Lab 3, and the

@@ -25,10 +25,11 @@ compare against, so measure carefully and write down how you measured.
 2. **[TUTORIAL.md](TUTORIAL.md)** — a guided run of the whole flow on the
    accelerator that ships here, with the output you should see at each stage.
 3. **The assignment is not here.** This directory is the worked reference, not
-   your work. What you must build and hand in is in the lab1 template:
-   [ASSIGNMENT.md](../lab1/ASSIGNMENT.md) and [REPORT.md](../lab1/REPORT.md).
-   *(`TODO.md` in this tree is a leftover describing the older matmul example
-   — ignore it.)*
+   your work. What you must build and hand in is in the Lab 1 template
+   repository, [ISA-LAB1](https://github.com/Integrated-Systems-Architecture/ISA-LAB1):
+   [ASSIGNMENT.md](https://github.com/Integrated-Systems-Architecture/ISA-LAB1/blob/main/ASSIGNMENT.md) and
+   [REPORT.md](https://github.com/Integrated-Systems-Architecture/ISA-LAB1/blob/main/REPORT.md). Clone this example next to your group
+   repository and keep it as a reference while you work.
 
 ## The whole flow, in order
 
@@ -37,7 +38,7 @@ time and read what comes back; every stage prints where it put its output.
 
 ```bash
 # --- once per shell: the environments -------------------------------------
-source /oss-tools/init.sh                    # python, fusesoc, verilator, klayout, $IHP_PDK_ROOT
+source /oss-tools/init.sh                    # x-heep conda env (python, fusesoc), verilator, $IHP_PDK_ROOT
 source /eda/scripts/init_design_vision       # dc_shell, lc_shell, pt_shell/pwr_shell
 source /eda/scripts/init_cadence_2020-21     # innovus   -- 2020-21, NOT 2021-22
 source /eda/scripts/init_questa_core_prime   # vsim
@@ -51,10 +52,10 @@ make sim             # Verilator, self-checking        -> TEST PASSED
 make questa          # QuestaSim, the same testbench   -> TEST PASSED
 
 # --- silicon ---------------------------------------------------------------
-make synth           # Design Compiler  -> netlist, area, f_max        (~2 min)
-make pnr-all         # Innovus: route, then optimise in a 2nd session  (~7 min)
-make power           # gate sim + PrimePower, synthesis netlist        (~3 min)
-make power-postlayout # the same on the routed netlist + SDF + SPEF    (~4 min)
+make synth           # Design Compiler  -> netlist, area, f_max        (~3 min)
+make pnr-all         # Innovus: route, then optimise in a 2nd session  (~15 min)
+make power           # gate sim + PrimePower, synthesis netlist        (~2 min)
+make power-postlayout # the same on the routed netlist + SDF + SPEF    (~1 min)
 
 # --- look at it ------------------------------------------------------------
 make gds             # KLayout on the final layout  (needs ssh -X)
@@ -222,7 +223,7 @@ what "working" looks like:
 | place and route | core 261.6 × 260.8 µm at 60 % utilisation, 8050 gates, 43 821 µm² |
 | final timing | setup **+0.259 ns**, hold **−0.002 ns**, **0 DRC violations** |
 | power, post-synthesis | **0.821 mW** at 100 MHz, typ corner |
-| power, post-layout | **1.172 mW** — same workload, same corner, real clock tree and real wires |
+| power, post-layout | **1.171 mW** — same workload, same corner, real clock tree and real wires |
 
 And the one number worth arguing about, from the power breakdown:
 
@@ -278,6 +279,14 @@ CPU (`QEMU Virtual CPU`, flags `sse4_2 popcnt` only) does not have it — it
 segfaults right after the licence checkout, even on a two-line script. Use
 `source /eda/scripts/init_cadence_2020-21`.
 
+**Innovus dies mid-run: `The X11 connection broke: I/O error`**
+Innovus connects to `$DISPLAY` whenever it is set, even in `-batch`, and dies
+when that display goes away — typically `make pnr-all` started in tmux over
+`ssh -X`, then the SSH session closed. The batch targets (`make pnr`,
+`make pnr-opt`, `make pnr-all`) now run Innovus with `DISPLAY` unset, so this
+only affects `make pnr-gui` and hand-started sessions: keep that SSH session
+open for as long as the GUI is.
+
 **`make pnr` finishes but hold is violated**
 Expected: `make pnr` routes, `make pnr-opt` fixes hold in a **second** Innovus
 session. `make pnr-all` does both. On 20.11 both `opt_design -post_route` and
@@ -285,11 +294,20 @@ session. `make pnr-all` does both. On 20.11 both `opt_design -post_route` and
 of `implementation/innovus/scripts/run_pnr_opt.tcl`. Even after `pnr-opt` the
 shipped design ends at −0.002 ns hold on two paths.
 
-**`missing .../sg13g2_stdcell_typ_1p20V_25C.db -- run make synth`**
-Power analysis runs at the **typical** corner; synthesis only caches the corner
-it synthesised at (`slow`). The Makefile now compiles that one Liberty with
-`lc_shell` on demand (`$(PWR_DB)`), so this should no longer appear — if it
-does, `lc_shell` is not on your `PATH`: `source /eda/scripts/init_design_vision`.
+**`lc_shell wrote no .../sg13g2_stdcell_typ_1p20V_25C.db`**
+Power analysis runs at the **typical** corner (`PWR_CORNER`) on the netlist
+synthesised at the slow one; nothing is re-synthesised. `run_pwr_flow.sh`
+compiles that one Liberty to a `.db` with `lc_shell` the first time and caches
+it. If this appears, read `implementation/power_analysis/lc_shell.log`: usually
+`IHP_PDK_ROOT` is wrong, `PWR_CORNER` is misspelt, or `lc_shell` is not on
+`PATH` (`source /eda/scripts/init_design_vision`). Do not "simplify" it to
+reading the `.lib` in PrimePower: that silently drops internal power and
+leakage.
+
+**`fusesoc setup failed -- read .../fusesoc_setup.log`**
+The gate-level simulation takes its testbench file list from FuseSoC (the same
+one `make questa` uses), so `make power` needs `source /oss-tools/init.sh` in
+the shell too, not just the EDA environments.
 
 **Power report says `clock_network 0.0000 W`**
 The SDC was not read, so PrimePower has no clock and no idea what "per second"
@@ -312,20 +330,27 @@ the Synopsys tools then load conda's `libstdc++` and die with
 `version CXXABI_1.3.15 not found`.
 
 **`klayout: command not found`, or the layout opens in meaningless colours**
-`source /oss-tools/init.sh` first. The colours come from the PDK's layer
+KLayout is installed system-wide on the ISA server (`/usr/bin/klayout`); it is
+not available on your own machine unless you install it. The colours come from the PDK's layer
 properties, `$IHP_PDK_ROOT/libs.tech/klayout/tech/sg13g2.lyp`, which `make gds`
 passes with `-l`; without it every layer is an anonymous number.
 
 **Questa: `Module 'tb_cordic_accel' does not have a timeunit/timeprecision
 specification in effect`**
-Missing `-timescale 1ns/1ps`. The `sim_questa` target in the `.core` file and
-`questa/gate_sim.do` both set it; a hand-rolled `vlog` will not.
+Missing `-timescale 1ns/1ps`. The `sim_questa` target in the `.core` file sets
+it, and `implementation/power_analysis/questa/gate_sim.do` replays that same
+compile script; a hand-rolled `vlog` will not.
 
 **A gate-level simulation fails its self-check, RTL passes**
-Post-synthesis, with the Design Compiler SDF annotated, this is a known
-unresolved problem — which is why `make power` runs at zero delay and the
-post-layout run (with the Innovus SDF) is the one that both annotates and
-passes. See the long comment in `questa/gate_sim.do`.
+Post-layout, check the testbench first: every DUT input must change *after*
+the clock edge. Testbench RTL on the ideal clock (here the `obi_mux`) changes
+its outputs exactly at the edge, the routed DUT sees the edge only after its
+clock-tree delay, and captures them one cycle early — results arrive shifted,
+or `STATUS.DONE` never comes. `tb/tb_cordic_accel.sv` delays the OBI response
+by `ApplDelay` under `GATE_LEVEL` for exactly this reason.
+Post-synthesis, with the Design Compiler SDF annotated, the self-check still
+fails for reasons not yet understood — which is why `make power` runs at zero
+delay. See the long comment in `implementation/power_analysis/questa/gate_sim.do`.
 
 ## Tools you must understand (not just invoke)
 
@@ -378,12 +403,14 @@ each cell's function, drive strengths and pin names, in
 
 ```
 README.md SETUP.md TUTORIAL.md   read them in that order
-                                 the assignment is in ../lab1/ASSIGNMENT.md
+                                 the assignment is in the ISA-LAB1 repository
 
-rtl/            cordic_pkg.sv  cordic_rot.sv  cordic_accel.sv
+rtl/            cordic_pkg.sv  cordic_accel_types_pkg.sv  cordic_rot.sv
+                cordic_accel.sv
                 cordic_accel_reg_{pkg,top}.sv   generated by `make regs`
 tb/             tb_cordic_accel.sv -- one testbench, both simulators
 model/          cordic_golden.py, check_bitexact.py
+model/cookbook/ the cookbook's model and RTL vectors, for `make bitexact`
 data/           cordic_accel.hjson -- the register description
 sw/             cordic_accel_regs.h -- generated, used by the Lab 3 driver
 vectors/        generated hex (gitignored)
@@ -395,33 +422,14 @@ implementation/
   innovus/            scripts/ + README.md
   power_analysis/     scripts/ questa/ + README.md
 
-vendor/         pinned IP snapshots (gitignored, `make vendor`)
+vendor/         pinned IP descriptors (*.core, *.hjson); the snapshots
+                `make vendor` fetches into vendor/pulp_platform/<ip>/ are gitignored
 util/vendor.py  the vendoring tool
 Makefile  cordic_accel.core
 ```
 
 ## What you hand in
 
-1. Commit the report, filled in, with the reports and figures it refers to.
-   Never commit `build/`, `vendor/pulp_platform/*/`, the generated CSR files,
-   `vectors/`, or anything under `implementation/*/artefacts/`,
-   `.../netlist/`, `.../reports/` or `.../vcd/` — they are generated, and they
-   are in `.gitignore`.
-2. **Publish a release of your repository.** The release is the submission: we
-   read the code and the report at that tag, so anything committed afterwards
-   does not count.
-
-```bash
-git add <the report> figures/
-git commit -m "Lab 1: standalone accelerator, synthesis, P&R and power"
-git push
-gh release create lab1-final --title "Lab 1" --notes "Standalone accelerator: RTL, synthesis, P&R, power"
-```
-
-Without the `gh` CLI, do the same from the repository page on GitHub:
-*Releases → Draft a new release → tag* `lab1-final` *→ Publish release*.
-
-One release per group. Late fixes mean a new release — tell us, because we take
-the latest one before the deadline.
-
-See the *Git Cookbook*, ch. 3, for tags, releases and the group workflow.
+Nothing from this repository. The hand-in rules (the report, the code, the
+`lab1-delivery` release) are in [ASSIGNMENT.md](https://github.com/Integrated-Systems-Architecture/ISA-LAB1/blob/main/ASSIGNMENT.md) of
+the Lab 1 template.

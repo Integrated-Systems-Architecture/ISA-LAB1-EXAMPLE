@@ -3,7 +3,7 @@ CAPI=2:
 #
 # The upstream repo is built with Bender, not FuseSoC, so this file is the
 # translation: it lists the sources in dependency order and names the VLNV
-# (pulp-platform.org::obi) that cordic_accel.core depends on. `make vendor`
+# (pulp-platform.org::obi) that obi_test, and so the testbench, depends on. `make vendor`
 # fetches the sources; this file tells FuseSoC how to compile them.
 #
 # Two filesets on purpose:
