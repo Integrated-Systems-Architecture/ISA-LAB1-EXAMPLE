@@ -10,8 +10,9 @@ wrong way), which is why the testbench compares integers.
 
 The same model lives in the cookbook (`books/examplecookbook/code/cordic/
 python/cordic_model.py`), where it is checked against a VHDL and a SystemVerilog
-implementation of the same rotator. This file is standalone on purpose: this
-lab must build without the cookbook checked out.
+implementation of the same rotator. A copy of that model and of the cookbook's
+RTL vectors sits in `model/cookbook/`, and `make bitexact` compares this file
+against both.
 
 Number formats
 --------------

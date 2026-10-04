@@ -17,9 +17,8 @@ The testbench already pins the RTL in this lab to `cordic_golden.py` on every
 the accelerator's rotator and the cookbook's rotator produce the same
 integers.
 
-The cookbook is a sibling directory of this lab, not a dependency of it: if it
-is not there, this check reports that it was skipped and exits 0, so a
-standalone checkout of the lab still builds and tests clean.
+Both references are copied into `model/cookbook/` (from ISA-BOOKS commit
+4f1b171), so this repository checks itself without the cookbook checked out.
 
     python3 model/check_bitexact.py        # or: make bitexact
 """
@@ -30,7 +29,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 LAB = HERE.parent
-COOKBOOK = LAB.parent / "books" / "examplecookbook" / "code" / "cordic"
+COOKBOOK = HERE / "cookbook"
 
 sys.path.insert(0, str(HERE))
 import cordic_golden as ours  # noqa: E402
@@ -43,7 +42,7 @@ def s16(hexstr):
 
 def check_against_model():
     """Sweep + random + corner cases against the cookbook's Python model."""
-    sys.path.insert(0, str(COOKBOOK / "python"))
+    sys.path.insert(0, str(COOKBOOK))
     import cordic_model as book  # noqa: E402
 
     # The constants have to agree before the arithmetic can.
@@ -79,11 +78,10 @@ def check_against_model():
 
 def check_against_vectors():
     """The vectors the cookbook's VHDL and SystemVerilog testbenches run."""
-    path = COOKBOOK / "vectors" / "cordic_vectors.txt"
+    path = COOKBOOK / "cordic_vectors.txt"
     if not path.is_file():
-        print(f"cookbook vectors: {path} not present "
-              f"(regenerate with `make vectors` in the cookbook), skipped")
-        return 0
+        print(f"cookbook vectors: {path} missing")
+        return 1
 
     rows = [ln.split() for ln in path.read_text().splitlines()
             if ln.strip() and not ln.startswith("#")]
@@ -101,9 +99,6 @@ def check_against_vectors():
 
 
 def main():
-    if not COOKBOOK.is_dir():
-        print(f"cookbook not found at {COOKBOOK} -- check skipped")
-        return 0
     return 1 if (check_against_model() + check_against_vectors()) else 0
 
 
